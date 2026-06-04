@@ -10,6 +10,7 @@
 /.nova
 /.phpunit.cache
 /.vscode
+/.vagrant
 /.zed
 /auth.json
 /composer.phar
@@ -24,3 +25,9 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+app/storage/
+bootstrap/compiled.php
+npm-debug.log
+public_html/hot
+public_html/storage
+yarn-error.log
