@@ -133,7 +133,7 @@ CSSセレクタで一覧、タイトル、URL、日付、本文を指定しま�
 
 ### JavaScript一覧収集
 
-蒲郡信用金庫のように、HTML本文ではなく `news_list.js` の `NewsListArray` に新着一覧が入っているサイトに対応しています。
+HTML本文ではなく `news_list.js` の `NewsListArray` に新着一覧が入っているサイトに対応しています。
 
 この形式を使う場合は、収集先設定で以下を指定します。
 
