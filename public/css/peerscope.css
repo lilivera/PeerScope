@@ -1,0 +1,278 @@
+body {
+    background: #f6f7f9;
+    color: #1f2933;
+}
+
+.app-shell {
+    min-height: 100vh;
+}
+
+.sidebar {
+    background: #ffffff;
+    border-right: 1px solid #dde3ea;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow-y: auto;
+    position: sticky;
+    top: 0;
+    width: 244px;
+}
+
+.sidebar-brand {
+    flex: 0 0 auto;
+    margin-bottom: 1.5rem;
+}
+
+.sidebar-nav {
+    flex: 1 1 auto;
+}
+
+.sidebar-user {
+    border-top: 1px solid #dde3ea;
+    flex: 0 0 auto;
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+.sidebar-user-name {
+    color: #1f2933;
+    font-weight: 700;
+}
+
+.brand-mark {
+    color: #0f766e;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.site-icon {
+    color: #198754;
+}
+
+.nav-link {
+    color: #465563;
+    border-radius: 8px;
+}
+
+.nav-link:hover,
+.nav-link.active {
+    background: #e7f5f1;
+    color: #0f766e;
+}
+
+.main-panel {
+    min-width: 0;
+}
+
+.content-wrap {
+    max-width: 1400px;
+}
+
+.surface {
+    background: #ffffff;
+    border: 1px solid #dde3ea;
+    border-radius: 8px;
+}
+
+.stat-card {
+    background: #ffffff;
+    border: 1px solid #dde3ea;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    min-height: 136px;
+}
+
+.stat-card.p-3 {
+    padding: 1.25rem !important;
+}
+
+.stat-card-header {
+    align-items: flex-start;
+    display: flex;
+    gap: .75rem;
+    justify-content: space-between;
+    min-height: 1.5rem;
+}
+
+.stat-card-body {
+    align-items: center;
+    display: flex;
+    flex: 1;
+    padding: .6rem 0 .7rem;
+}
+
+.stat-card-footer {
+    align-items: center;
+    display: flex;
+    min-height: 1.5rem;
+}
+
+.stat-card-footer a {
+    align-items: center;
+    display: inline-flex;
+    gap: .1rem;
+    text-decoration: none;
+}
+
+.stat-card-footer a:hover,
+.stat-card-footer a:focus-visible {
+    text-decoration: underline;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.stat-value-sm {
+    font-size: 1.35rem;
+    line-height: 1.2;
+}
+
+.table thead th {
+    color: #5d6b78;
+    font-size: .82rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.table-sort-button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    display: inline-flex;
+    font: inherit;
+    font-weight: inherit;
+    gap: .25rem;
+    padding: 0;
+}
+
+.table-sort-button:hover,
+.table-sort-button:focus-visible,
+.table-sort-button.is-active {
+    color: #0f766e;
+}
+
+.sort-indicator::before {
+    color: #9aa5b1;
+    content: "\2195";
+    font-size: .75rem;
+}
+
+.table-sort-button[data-sort-direction="asc"] .sort-indicator::before {
+    color: #0f766e;
+    content: "\2191";
+}
+
+.table-sort-button[data-sort-direction="desc"] .sort-indicator::before {
+    color: #0f766e;
+    content: "\2193";
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.table-title {
+    max-width: 420px;
+}
+
+.badge-soft {
+    background: #eef2f6;
+    color: #465563;
+}
+
+.badge-unread {
+    background: #fff1d6;
+    color: #8a5a00;
+}
+
+.badge-read {
+    background: #e7f5f1;
+    color: #0f766e;
+}
+
+.form-control,
+.form-select,
+.btn {
+    border-radius: 8px;
+}
+
+.btn-primary {
+    background: #0f766e;
+    border-color: #0f766e;
+}
+
+.btn-primary:hover {
+    background: #115e59;
+    border-color: #115e59;
+}
+
+.btn-outline-primary {
+    color: #0f766e;
+    border-color: #0f766e;
+}
+
+.btn-outline-primary:hover {
+    background: #0f766e;
+    border-color: #0f766e;
+}
+
+.meta-label {
+    color: #6b7785;
+    font-size: .84rem;
+    font-weight: 700;
+}
+
+.empty-state {
+    color: #6b7785;
+    padding: 3rem 1rem;
+    text-align: center;
+}
+
+@media (max-width: 991.98px) {
+    .app-shell {
+        display: block !important;
+    }
+
+    .sidebar {
+        border-bottom: 1px solid #dde3ea;
+        border-right: 0;
+        height: auto;
+        position: static;
+        width: 100%;
+    }
+
+    .sidebar-brand {
+        margin-bottom: 1rem;
+    }
+
+    .sidebar .nav {
+        flex-direction: row !important;
+        overflow-x: auto;
+        padding-bottom: .5rem;
+    }
+
+    .sidebar .nav-link {
+        white-space: nowrap;
+    }
+
+    .sidebar-user {
+        align-items: center;
+        display: flex;
+        gap: .75rem;
+        justify-content: space-between;
+    }
+
+    .sidebar-user form {
+        margin-top: 0 !important;
+    }
+
+    .sidebar-user .btn {
+        width: auto !important;
+    }
+}

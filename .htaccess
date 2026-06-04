@@ -1,0 +1,15 @@
+<IfModule mod_rewrite.c>
+    Options -Indexes
+    RewriteEngine On
+
+    RewriteCond %{REQUEST_URI} ^/peerscope(/.*)?$
+    RewriteRule ^(.*)$ /PeerScope/$1 [R=302,L]
+
+    RewriteRule ^(\.env|artisan|composer\.(json|lock|phar)|package(-lock)?\.json|phpunit\.xml|vite\.config\.js|README\.md|CHANGELOG\.md)$ - [F,L]
+    RewriteRule ^(app|bootstrap|config|database|resources|routes|storage|tests|vendor)(/|$) - [F,L]
+    RewriteRule (^|/)\. - [F,L]
+
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
