@@ -8,7 +8,7 @@
     <link rel="shortcut icon" href="{{ asset('favicon.ico') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="{{ asset('css/peerscope.css') }}" rel="stylesheet">
+    <link href="{{ asset('css/peerscope.css') }}?v={{ filemtime(public_path('css/peerscope.css')) }}" rel="stylesheet">
     @stack('head')
 </head>
 <body>
@@ -78,7 +78,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
-<script src="{{ asset('js/peerscope.js') }}"></script>
+<script src="{{ asset('js/peerscope.js') }}?v={{ filemtime(public_path('js/peerscope.js')) }}"></script>
 @stack('scripts')
 </body>
 </html>

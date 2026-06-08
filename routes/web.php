@@ -31,6 +31,10 @@ Route::middleware('auth')->group(function (): void {
 
 // 収集設定やユーザー管理は管理者だけに絞る。
 Route::middleware(['auth', 'admin'])->group(function (): void {
+    Route::post('/users/import', [UserController::class, 'import'])->name('users.import');
+    Route::get('/users/import-directories', [UserController::class, 'importDirectories'])->name('users.import-directories');
+    Route::post('/users/import-setting', [UserController::class, 'updateImportSetting'])->name('users.import-setting.update');
+    Route::post('/users/import-folder/run', [UserController::class, 'runFolderImport'])->name('users.import-folder.run');
     Route::resource('users', UserController::class)->except(['show', 'destroy']);
     Route::resource('companies', CompanyController::class)->except(['show', 'destroy']);
     Route::resource('watch-sources', WatchSourceController::class)

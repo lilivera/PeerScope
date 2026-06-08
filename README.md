@@ -8,10 +8,13 @@ XAMPPのApache配下で `http://localhost/PeerScope` として動作すること
 
 - IDとパスワードによるログイン
 - 管理者・一般ユーザーのロール管理
+- ユーザーCSVの手動取込
+- 指定フォルダ配置CSVによるユーザー取込ジョブ
 - 会社マスタ管理
 - 収集先マスタ管理
 - RSS/HTMLページからの新着情報収集
 - JavaScript配列形式の新着一覧収集
+- JSON形式の新着一覧収集
 - PDFリンクの自動保存と認証付きダウンロード
 - 新着一覧の検索・会社絞り込み・日付絞り込み・既読絞り込み
 - 記事詳細表示時の自動既読化
@@ -102,6 +105,47 @@ http://localhost/PeerScope
 - `admin`: ユーザー、会社、収集先、収集ログを管理できます。
 - `user`: 新着情報の閲覧、既読化、PDFダウンロードができます。
 
+ログインIDが `admin` のユーザーはシステム管理者として扱い、ユーザー管理画面やCSV取込での編集・削除対象外です。管理者ロールを持つ通常ユーザーは登録・編集できます。
+
+## ユーザーCSV取込
+
+管理者はユーザー管理画面からCSVをアップロードし、ユーザーを一括登録・削除できます。
+
+CSVの列は以下です。
+
+```csv
+action,login_id,name,email,password,role
+登録,user01,User One,user01@example.com,password123,user
+登録,manager01,Manager One,manager01@example.com,password123,admin
+削除,user02,,,,
+```
+
+| 列 | 内容 |
+| --- | --- |
+| `action` | `登録` / `追加` / `create`、または `削除` / `delete` |
+| `login_id` | ログインID |
+| `name` | 名前。削除時は空で可 |
+| `email` | メールアドレス。削除時は空で可 |
+| `password` | 登録時の初期パスワード。8文字以上 |
+| `role` | `user` または `admin`。省略時は `user` |
+
+1行でもエラーがある場合、そのCSVの変更は反映しません。
+
+### フォルダ取込ジョブ
+
+ユーザー管理画面で、CSV取込ジョブの有効化、実行時刻、取込フォルダ、処理済みフォルダ、失敗フォルダを設定できます。フォルダは `storage/app` 配下を画面の選択ボタンから選べます。
+
+既定値は以下です。
+
+| 項目 | 既定値 |
+| --- | --- |
+| 実行時刻 | `09:00` |
+| 取込フォルダ | `user-import/inbox` |
+| 処理済みフォルダ | `user-import/processed` |
+| 失敗フォルダ | `user-import/failed` |
+
+成功したCSVは処理済みフォルダへ移動します。失敗したCSVは失敗フォルダへ移動し、同名の `.error.txt` に理由を保存します。
+
 ## 収集仕様
 
 収集先は `watch_sources` テーブルで管理します。
@@ -142,6 +186,18 @@ list_selector = js-news-list
 ```
 
 ページ内の hidden `target` に一致するカテゴリだけを収集し、同じURLが複数カテゴリに出る場合は1件にまとめます。
+
+### JSON一覧収集
+
+HTML本文ではなくJSONデータから新着一覧を組み立てるサイトに対応しています。
+
+この形式を使う場合は、収集先設定で以下を指定します。
+
+```text
+list_selector = json-news-list
+```
+
+通常記事、直接リンク、PDFリンクを共通形式に変換して保存します。
 
 ### URL正規化と重複判定
 
@@ -195,15 +251,28 @@ php artisan peerscope:test-source {id}
 php artisan peerscope:run-collection {run_id} --source={watch_source_id}
 ```
 
+設定フォルダに配置されたユーザーCSVを取り込みます。通常はスケジューラから実行されます。
+
+```bash
+php artisan peerscope:import-users-folder
+```
+
+設定の有効/無効や実行時刻に関係なく即時実行する場合は `--force` を付けます。
+
+```bash
+php artisan peerscope:import-users-folder --force
+```
+
 ## スケジュール
 
 `routes/console.php` で以下のスケジュールを定義しています。
 
 ```php
 peerscope:collect
+peerscope:import-users-folder
 ```
 
-実行間隔は1時間ごとです。
+新着収集は1時間ごとに実行します。ユーザーCSVフォルダ取込は毎分確認し、設定した時刻を過ぎていて当日未実行の場合のみ実行します。
 
 本番運用ではLaravel SchedulerをOSのcronやタスクスケジューラから毎分起動してください。
 
@@ -222,6 +291,7 @@ php artisan schedule:run
 | `item_reads` | ユーザー別既読状態 |
 | `collection_runs` | 収集実行ログ |
 | `collection_errors` | 収集エラー |
+| `user_import_settings` | ユーザーCSVフォルダ取込設定 |
 
 ## 画面仕様
 
@@ -256,7 +326,7 @@ php artisan schedule:run
 
 ## 収集先設定の例
 
-信用金庫各社のニュースページ、重要なお知らせページ、PDFリンクを含む告知ページなどを収集先として登録できます。
+各社のニュースページ、重要なお知らせページ、PDFリンクを含む告知ページなどを収集先として登録できます。
 
 登録時は、対象サイトのHTML構造に合わせてCSSセレクタや `js-news-list` 形式を設定します。
 

@@ -11,3 +11,7 @@ Artisan::command('inspire', function () {
 app(Schedule::class)->command('peerscope:collect')
     ->hourly()
     ->withoutOverlapping(60);
+
+app(Schedule::class)->command('peerscope:import-users-folder')
+    ->everyMinute()
+    ->withoutOverlapping(10);

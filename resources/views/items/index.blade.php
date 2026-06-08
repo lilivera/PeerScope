@@ -119,6 +119,8 @@
             </table>
         </div>
 
-        {{ $items->links() }}
+        <div class="items-pagination mt-3">
+            {{ $items->links('vendor.pagination.peerscope-centered') }}
+        </div>
     </section>
 @endsection

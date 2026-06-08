@@ -54,6 +54,11 @@ class User extends Authenticatable
         return $this->role === 'admin';
     }
 
+    public function isSystemAdmin(): bool
+    {
+        return $this->login_id === 'admin';
+    }
+
     public function reads()
     {
         return $this->hasMany(ItemRead::class);

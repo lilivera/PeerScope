@@ -16,6 +16,12 @@ use Throwable;
 
 class HtmlCollector
 {
+    private const JSON_NEWS_LISTPAGE_DIR = [
+        '1' => '',
+        '2' => 'kojin/',
+        '3' => 'hojin/',
+    ];
+
     public function __construct(
         private readonly UrlNormalizer $urlNormalizer,
         private readonly CssSelectorConverter $converter = new CssSelectorConverter,
@@ -33,8 +39,13 @@ class HtmlCollector
         }
 
         if ($source->list_selector === 'js-news-list') {
-            // 蒲郡信用金庫のように一覧がJavaScript配列だけで提供されるページ用の特別処理。
+            // 一覧がJavaScript配列だけで提供されるページ用の特別処理。
             return $this->parseJsNewsList($html, $source);
+        }
+
+        if ($source->list_selector === 'json-news-list') {
+            // HTML表示をJSONから組み立てるサイト用の特別処理。
+            return $this->parseJsonNewsList($html, $source);
         }
 
         foreach (['title_selector', 'url_selector'] as $field) {
@@ -319,5 +330,208 @@ class HtmlCollector
     private function decodeJsString(string $value): string
     {
         return stripcslashes($value);
+    }
+
+    /**
+     * assets/data/news/list.json を使うサイトの新着一覧を、ブラウザと同じ条件で取り込む。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseJsonNewsList(string $html, WatchSource $source): array
+    {
+        $webroot = $this->extractDataWebroot($html) ?? $this->inferJsonNewsWebroot($source);
+        $listPages = $this->extractJsonNewsListPages($html);
+        $listPageSet = array_fill_keys($listPages, true);
+        $jsonUrl = $this->jsonNewsListUrl($webroot, $source);
+        $rows = $this->loadJsonNewsRows($jsonUrl);
+        $items = [];
+        $seenUrls = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! $this->jsonNewsBelongsToListPage($row, $listPageSet)) {
+                continue;
+            }
+
+            $title = $this->cleanText((string) ($row['title'] ?? ''));
+            $url = $this->jsonNewsItemUrl($row, $webroot, $listPages[0] ?? null);
+            $normalizedUrl = $url ? $this->urlNormalizer->normalize($url, $source->source_url) : null;
+
+            if ($title === '' || $normalizedUrl === null || isset($seenUrls[$normalizedUrl])) {
+                continue;
+            }
+
+            // JSON内で同じ記事が複数カテゴリに属しても、収集元内ではURLで一度だけ扱う。
+            $seenUrls[$normalizedUrl] = true;
+
+            $items[] = [
+                'title' => $title,
+                'url' => $normalizedUrl,
+                'published_at' => $this->parseDate((string) ($row['pubdate'] ?? '')),
+                'summary' => $title,
+                'body_text' => null,
+                'category' => $source->source_name,
+            ];
+        }
+
+        return $items;
+    }
+
+    private function extractDataWebroot(string $html): ?string
+    {
+        preg_match('/<body\b[^>]*\bdata-webroot=["\']([^"\']*)["\']/i', $html, $matches);
+        $webroot = trim(html_entity_decode($matches[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+        return $webroot !== '' ? $webroot : null;
+    }
+
+    private function inferJsonNewsWebroot(WatchSource $source): string
+    {
+        $path = parse_url($source->source_url, PHP_URL_PATH) ?: '/';
+
+        if (preg_match('#/news/?$#', $path)) {
+            return (string) preg_replace('#news/?$#', '', $path);
+        }
+
+        return '/';
+    }
+
+    /**
+     * ページ上の _cmn-newslist が指定している一覧ページ番号を取り出す。
+     *
+     * @return array<int, string>
+     */
+    private function extractJsonNewsListPages(string $html): array
+    {
+        preg_match_all('/<[^>]*_cmn-newslist[^>]*>/i', $html, $tags);
+        $pages = [];
+
+        foreach ($tags[0] ?? [] as $tag) {
+            if (! preg_match('/\bdata-listpage=["\']?([^"\'\s>]+)["\']?/i', $tag, $matches)) {
+                continue;
+            }
+
+            $page = trim(html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+            if ($page !== '') {
+                $pages[$page] = true;
+            }
+        }
+
+        return array_keys($pages);
+    }
+
+    private function jsonNewsListUrl(string $webroot, WatchSource $source): string
+    {
+        $path = rtrim($webroot, '/').'/assets/data/news/list.json';
+        $url = $this->urlNormalizer->normalize($path, $source->source_url);
+
+        if ($url === null) {
+            throw new RuntimeException('ニュースJSONのURLを解決できません。');
+        }
+
+        return $url;
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function loadJsonNewsRows(string $jsonUrl): array
+    {
+        $response = Http::timeout(20)
+            ->retry(1, 500)
+            ->withUserAgent('PeerScope/0.1 (+internal news monitoring)')
+            ->accept('application/json, */*;q=0.8')
+            ->get($jsonUrl);
+
+        if ($response->status() >= 400) {
+            throw new RuntimeException('ニュースJSONの取得に失敗しました: HTTP '.$response->status());
+        }
+
+        try {
+            $payload = json_decode($response->body(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new RuntimeException('ニュースJSONの解析に失敗しました: '.$exception->getMessage(), 0, $exception);
+        }
+
+        if (! is_array($payload) || ! is_array($payload['list'] ?? null)) {
+            throw new RuntimeException('ニュースJSONにlist配列がありません。');
+        }
+
+        return $payload['list'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array<string, true>  $listPageSet
+     */
+    private function jsonNewsBelongsToListPage(array $row, array $listPageSet): bool
+    {
+        if ($listPageSet === []) {
+            return true;
+        }
+
+        if (! is_array($row['listpages'] ?? null)) {
+            return false;
+        }
+
+        foreach ($row['listpages'] as $page) {
+            if (isset($listPageSet[(string) $page])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function jsonNewsItemUrl(array $row, string $webroot, ?string $listPage): ?string
+    {
+        return match ((string) ($row['type'] ?? '')) {
+            '1' => $this->jsonNewsDetailUrl($row, $webroot, $listPage),
+            '2' => (string) ($row['link_url'] ?? '') ?: null,
+            '3' => (string) ($row['file'] ?? '') ?: null,
+            default => null,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function jsonNewsDetailUrl(array $row, string $webroot, ?string $listPage): ?string
+    {
+        $id = $row['id'] ?? null;
+
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        $root = rtrim($webroot, '/').'/';
+        $dir = $this->jsonNewsListPageDir($listPage, $row);
+
+        return $root.$dir.'news/detail/'.$id.'/';
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function jsonNewsListPageDir(?string $listPage, array $row): string
+    {
+        if ($listPage !== null && array_key_exists($listPage, self::JSON_NEWS_LISTPAGE_DIR)) {
+            return self::JSON_NEWS_LISTPAGE_DIR[$listPage];
+        }
+
+        if (is_array($row['listpages'] ?? null)) {
+            foreach ($row['listpages'] as $page) {
+                $key = (string) $page;
+
+                if (array_key_exists($key, self::JSON_NEWS_LISTPAGE_DIR)) {
+                    return self::JSON_NEWS_LISTPAGE_DIR[$key];
+                }
+            }
+        }
+
+        return '';
     }
 }

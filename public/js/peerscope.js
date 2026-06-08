@@ -66,4 +66,123 @@
             button.addEventListener('click', () => sortTable(table, button));
         });
     });
+
+    const directoryPicker = document.getElementById('directoryPickerModal');
+
+    if (directoryPicker) {
+        const fallbackModal = {
+            show: () => {
+                directoryPicker.style.display = 'block';
+                directoryPicker.removeAttribute('aria-hidden');
+                directoryPicker.setAttribute('aria-modal', 'true');
+                directoryPicker.classList.add('show');
+                document.body.classList.add('modal-open');
+            },
+            hide: () => {
+                directoryPicker.classList.remove('show');
+                directoryPicker.style.display = 'none';
+                directoryPicker.setAttribute('aria-hidden', 'true');
+                directoryPicker.removeAttribute('aria-modal');
+                document.body.classList.remove('modal-open');
+            },
+        };
+        const modal = window.bootstrap ? new window.bootstrap.Modal(directoryPicker) : fallbackModal;
+        const endpoint = directoryPicker.dataset.directoryPickerUrl;
+        const currentLabel = directoryPicker.querySelector('[data-directory-picker-current]');
+        const list = directoryPicker.querySelector('[data-directory-picker-list]');
+        const parentButton = directoryPicker.querySelector('[data-directory-picker-parent]');
+        const selectButton = directoryPicker.querySelector('[data-directory-picker-select]');
+        let activeInput = null;
+        let currentPath = '';
+        let parentPath = null;
+
+        const showDirectoryPickerMessage = (message, type = 'muted') => {
+            list.innerHTML = '';
+
+            const item = document.createElement('div');
+            item.className = `list-group-item text-${type} small`;
+            item.textContent = message;
+            list.appendChild(item);
+        };
+
+        const loadDirectories = async (path = '') => {
+            showDirectoryPickerMessage('フォルダを読み込んでいます。');
+
+            let data;
+
+            try {
+                const response = await fetch(`${endpoint}?path=${encodeURIComponent(path)}`, {
+                    headers: {
+                        Accept: 'application/json',
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                data = await response.json();
+            } catch (error) {
+                currentLabel.textContent = 'storage/app';
+                parentButton.disabled = true;
+                showDirectoryPickerMessage('フォルダ一覧を取得できませんでした。ページを再読み込みして再度お試しください。', 'danger');
+
+                return;
+            }
+
+            currentPath = data.current?.path ?? '';
+            parentPath = data.parent ?? null;
+            currentLabel.textContent = data.current?.label ?? 'storage/app';
+            parentButton.disabled = parentPath === null;
+            list.innerHTML = '';
+
+            if ((data.directories ?? []).length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'list-group-item text-muted small';
+                empty.textContent = '下位フォルダはありません。';
+                list.appendChild(empty);
+
+                return;
+            }
+
+            data.directories.forEach((directory) => {
+                const button = document.createElement('button');
+                button.className = 'list-group-item list-group-item-action d-flex align-items-center gap-2';
+                button.type = 'button';
+                button.innerHTML = '<i class="bi bi-folder" aria-hidden="true"></i>';
+                button.append(document.createTextNode(directory.name));
+                button.addEventListener('click', () => loadDirectories(directory.path));
+                list.appendChild(button);
+            });
+        };
+
+        document.querySelectorAll('.js-directory-picker').forEach((button) => {
+            button.addEventListener('click', async () => {
+                activeInput = document.querySelector(button.dataset.directoryPickerTarget);
+                modal.show();
+                await loadDirectories(activeInput?.value ?? '');
+            });
+        });
+
+        parentButton.addEventListener('click', () => {
+            if (parentPath !== null) {
+                loadDirectories(parentPath);
+            }
+        });
+
+        selectButton.addEventListener('click', () => {
+            if (activeInput) {
+                activeInput.value = currentPath;
+                activeInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            modal.hide();
+        });
+
+        if (!window.bootstrap) {
+            directoryPicker.querySelectorAll('[data-bs-dismiss="modal"]').forEach((button) => {
+                button.addEventListener('click', () => modal.hide());
+            });
+        }
+    }
 })();

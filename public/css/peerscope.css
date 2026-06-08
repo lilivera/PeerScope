@@ -181,6 +181,22 @@ body {
     max-width: 420px;
 }
 
+.items-pagination {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.items-pagination nav {
+    display: flex;
+    justify-content: center;
+}
+
+.items-pagination .pagination {
+    justify-content: center;
+    margin-bottom: 0;
+}
+
 .badge-soft {
     background: #eef2f6;
     color: #465563;
