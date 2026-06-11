@@ -27,8 +27,10 @@ class WatchSourceController extends Controller
     {
         return view('watch_sources.create', [
             'source' => new WatchSource([
-                'source_type' => 'rss',
+                'source_type' => 'auto',
                 'crawl_interval_minutes' => 60,
+                'schedule_type' => 'daily',
+                'schedule_time' => '09:00',
                 'is_active' => true,
             ]),
             'companies' => $this->companies(),
@@ -113,18 +115,57 @@ class WatchSourceController extends Controller
             'company_id' => ['required', 'integer', Rule::exists('companies', 'id')],
             'source_name' => ['required', 'string', 'max:255'],
             'source_url' => ['required', 'url', 'max:2048'],
-            'source_type' => ['required', Rule::in(['rss', 'html'])],
+            'source_type' => ['required', Rule::in(['auto', 'rss', 'html'])],
             'list_selector' => ['nullable', 'required_if:source_type,html', 'string', 'max:1024'],
             'title_selector' => ['nullable', 'required_if:source_type,html', 'string', 'max:1024'],
             'url_selector' => ['nullable', 'required_if:source_type,html', 'string', 'max:1024'],
             'date_selector' => ['nullable', 'string', 'max:1024'],
             'body_selector' => ['nullable', 'string', 'max:1024'],
-            'crawl_interval_minutes' => ['required', 'integer', 'min:1'],
+            'crawl_interval_minutes' => ['nullable', 'required_if:schedule_type,interval', 'integer', 'min:1'],
+            'schedule_type' => ['required', Rule::in(['interval', 'daily', 'weekly', 'monthly'])],
+            'schedule_time' => ['nullable', 'required_unless:schedule_type,interval', 'date_format:H:i'],
+            'schedule_weekdays' => ['nullable', 'required_if:schedule_type,weekly', 'array'],
+            'schedule_weekdays.*' => ['integer', 'between:0,6'],
+            'schedule_month_days' => ['nullable', 'required_if:schedule_type,monthly', 'array'],
+            'schedule_month_days.*' => ['integer', 'between:1,31'],
         ]);
 
         $data['is_active'] = $request->boolean('is_active');
 
+        return $this->normalizeScheduleData($data);
+    }
+
+    private function normalizeScheduleData(array $data): array
+    {
+        $data['crawl_interval_minutes'] = (int) (($data['crawl_interval_minutes'] ?? null) ?: 60);
+
+        if ($data['schedule_type'] === 'interval') {
+            $data['schedule_time'] = null;
+            $data['schedule_weekdays'] = null;
+            $data['schedule_month_days'] = null;
+
+            return $data;
+        }
+
+        $data['schedule_time'] = $data['schedule_time'] ?: '09:00';
+        $data['schedule_weekdays'] = $data['schedule_type'] === 'weekly'
+            ? $this->normalizeNumberList($data['schedule_weekdays'] ?? [])
+            : null;
+        $data['schedule_month_days'] = $data['schedule_type'] === 'monthly'
+            ? $this->normalizeNumberList($data['schedule_month_days'] ?? [])
+            : null;
+
         return $data;
+    }
+
+    private function normalizeNumberList(array $values): array
+    {
+        return collect($values)
+            ->map(fn ($value): int => (int) $value)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
     }
 
     private function companies()

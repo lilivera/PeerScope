@@ -250,6 +250,13 @@ body {
     text-align: center;
 }
 
+.schedule-check-grid {
+    display: grid;
+    gap: .5rem;
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    max-width: 720px;
+}
+
 @media (max-width: 991.98px) {
     .app-shell {
         display: block !important;

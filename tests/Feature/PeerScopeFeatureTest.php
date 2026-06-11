@@ -448,6 +448,303 @@ class PeerScopeFeatureTest extends TestCase
             ->assertSeeInOrder(['新しい掲載日', '古い掲載日']);
     }
 
+    public function test_admin_can_register_auto_source_with_weekly_schedule(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+
+        $this->actingAs($admin)->post(route('watch-sources.store'), [
+            'company_id' => $company->id,
+            'source_name' => '自動収集',
+            'source_url' => 'https://example.com/news/',
+            'source_type' => 'auto',
+            'schedule_type' => 'weekly',
+            'schedule_time' => '13:15',
+            'schedule_weekdays' => ['1', '5'],
+            'is_active' => '1',
+        ])->assertRedirect(route('watch-sources.index'));
+
+        $source = WatchSource::query()->where('source_name', '自動収集')->firstOrFail();
+
+        $this->assertSame('auto', $source->source_type);
+        $this->assertSame('weekly', $source->schedule_type);
+        $this->assertSame('13:15', $source->schedule_time);
+        $this->assertSame([1, 5], $source->schedule_weekdays);
+        $this->assertNull($source->list_selector);
+    }
+
+    public function test_calendar_schedule_runs_once_after_scheduled_time(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-08 08:59:00'));
+
+        try {
+            Http::fake([
+                'https://example.com/rss.xml' => Http::response(<<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>指定時刻のお知らせ</title>
+      <link>https://example.com/scheduled/1</link>
+      <pubDate>Mon, 08 Jun 2026 09:00:00 +0900</pubDate>
+    </item>
+  </channel>
+</rss>
+XML, 200, ['Content-Type' => 'application/rss+xml']),
+            ]);
+
+            $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+            WatchSource::create([
+                'company_id' => $company->id,
+                'source_name' => '時刻指定',
+                'source_url' => 'https://example.com/rss.xml',
+                'source_type' => 'rss',
+                'crawl_interval_minutes' => 60,
+                'schedule_type' => 'daily',
+                'schedule_time' => '09:00',
+                'is_active' => true,
+            ]);
+
+            $beforeRun = app(NewsCollectorService::class)->collectDue();
+
+            $this->assertSame(0, $beforeRun->target_count);
+            $this->assertDatabaseMissing('collected_items', [
+                'title' => '指定時刻のお知らせ',
+            ]);
+
+            Carbon::setTestNow(Carbon::parse('2026-06-08 09:00:00'));
+
+            $dueRun = app(NewsCollectorService::class)->collectDue();
+
+            $this->assertSame(1, $dueRun->target_count);
+            $this->assertDatabaseHas('collected_items', [
+                'title' => '指定時刻のお知らせ',
+            ]);
+
+            Carbon::setTestNow(Carbon::parse('2026-06-08 09:01:00'));
+
+            $secondRun = app(NewsCollectorService::class)->collectDue();
+
+            $this->assertSame(0, $secondRun->target_count);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_auto_collection_uses_discovered_feed(): void
+    {
+        Http::fake([
+            'https://example.com/news/' => Http::response(<<<'HTML'
+<!doctype html>
+<html>
+  <head>
+    <link rel="alternate" type="application/rss+xml" href="/feed.xml">
+  </head>
+  <body></body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+            'https://example.com/feed.xml' => Http::response(<<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>フィード自動判定のお知らせ</title>
+      <link>https://example.com/feed/1</link>
+      <pubDate>Mon, 01 Jun 2026 09:00:00 +0900</pubDate>
+    </item>
+  </channel>
+</rss>
+XML, 200, ['Content-Type' => 'application/rss+xml']),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => '自動判定',
+            'source_url' => 'https://example.com/news/',
+            'source_type' => 'auto',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+
+        app(NewsCollectorService::class)->collectSource($source);
+
+        $this->assertDatabaseHas('collected_items', [
+            'title' => 'フィード自動判定のお知らせ',
+            'url' => 'https://example.com/feed/1',
+        ]);
+    }
+
+    public function test_auto_collection_reads_generic_news_list(): void
+    {
+        Http::fake([
+            'https://example.com/news/' => Http::response(<<<'HTML'
+<!doctype html>
+<html>
+  <body>
+    <ul class="news-list">
+      <li>
+        <time>2026.06.01</time>
+        <a href="/news/auto-1.pdf">自動判定のお知らせ</a>
+      </li>
+    </ul>
+  </body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news/',
+            'source_type' => 'auto',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+
+        app(NewsCollectorService::class)->collectSource($source);
+
+        $this->assertDatabaseHas('collected_items', [
+            'title' => '自動判定のお知らせ',
+            'url' => 'https://example.com/news/auto-1.pdf',
+            'published_at' => '2026-06-01 00:00:00',
+        ]);
+    }
+
+    public function test_auto_collection_reads_same_origin_iframe_news_list(): void
+    {
+        Http::fake([
+            'https://example.com/news/' => Http::response(<<<'HTML'
+<!doctype html>
+<html>
+  <body>
+    <iframe src="/embedded/history.html"></iframe>
+  </body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+            'https://example.com/embedded/history.html' => Http::response(<<<'HTML'
+<!doctype html>
+<html>
+  <body>
+    <div class="news_block">
+      <dl>
+        <dt><strong>2026年06月10日</strong></dt>
+        <dd><a href="/docs/notice.pdf">埋め込み一覧のお知らせ</a></dd>
+      </dl>
+    </div>
+  </body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news/',
+            'source_type' => 'auto',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+
+        app(NewsCollectorService::class)->collectSource($source);
+
+        $this->assertDatabaseHas('collected_items', [
+            'title' => '埋め込み一覧のお知らせ',
+            'url' => 'https://example.com/docs/notice.pdf',
+            'published_at' => '2026-06-10 00:00:00',
+        ]);
+    }
+
+    public function test_auto_collection_reads_hidden_target_js_news_list(): void
+    {
+        Http::fake([
+            'https://example.com/etc/list.html' => Http::response(<<<'HTML'
+<!doctype html>
+<html>
+  <body>
+    <div id="DivContentsList">
+      <input type="hidden" name="target" value="1_10">
+    </div>
+  </body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+            'https://example.com/js/news_list.js' => Http::response(<<<'JS'
+NewsListArray[1] = new Array;
+NewsListArray[1][10] = [
+    ['2026/05/07','対象のお知らせ','./2026050110082185.html','_self','10']
+];
+NewsListArray[1][20] = [
+    ['2026/04/01','対象外のお知らせ','./outside.html','_self','20']
+];
+JS, 200, ['Content-Type' => 'application/javascript']),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'お知らせ一覧',
+            'source_url' => 'https://example.com/etc/list.html',
+            'source_type' => 'auto',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+
+        app(NewsCollectorService::class)->collectSource($source);
+
+        $this->assertDatabaseHas('collected_items', [
+            'title' => '対象のお知らせ',
+            'url' => 'https://example.com/etc/2026050110082185.html',
+            'published_at' => '2026-05-07 00:00:00',
+        ]);
+        $this->assertDatabaseMissing('collected_items', [
+            'title' => '対象外のお知らせ',
+        ]);
+    }
+
+    public function test_auto_collection_uses_row_date_and_keeps_same_url_rows(): void
+    {
+        Http::fake([
+            'https://example.com/news/' => Http::response(<<<'HTML'
+<!doctype html>
+<html>
+  <body>
+    <div id="news" class="news_list">
+      <dl>
+        <dt>2025年10月27日</dt>
+        <dd>
+          <a href="/shared/">募集を2025年11月4日より開始します。</a>
+          <a href="/files/flyer.pdf">チラシPDF</a>
+        </dd>
+        <dt>2024年07月13日</dt>
+        <dd><a href="/shared/">同じURLの別行のお知らせ</a></dd>
+      </dl>
+    </div>
+  </body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news/',
+            'source_type' => 'auto',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+
+        $result = app(NewsCollectorService::class)->testSource($source, 10);
+
+        $this->assertSame(2, $result['count']);
+        $this->assertSame('募集を2025年11月4日より開始します。', $result['items'][0]['title']);
+        $this->assertSame('2025-10-27', $result['items'][0]['published_at']->format('Y-m-d'));
+        $this->assertSame('同じURLの別行のお知らせ', $result['items'][1]['title']);
+        $this->assertSame('2024-07-13', $result['items'][1]['published_at']->format('Y-m-d'));
+    }
+
     public function test_rss_collection_deduplicates_by_url_hash(): void
     {
         Http::fake([

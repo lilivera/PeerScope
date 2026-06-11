@@ -18,7 +18,7 @@
                     <th>会社</th>
                     <th>収集元名</th>
                     <th>方式</th>
-                    <th>間隔</th>
+                    <th>実行周期</th>
                     <th>最終収集日時</th>
                     <th>有効区分</th>
                     <th class="text-end">新着</th>
@@ -33,8 +33,8 @@
                             <div class="fw-semibold">{{ $source->source_name }}</div>
                             <a class="small" href="{{ $source->source_url }}" target="_blank" rel="noopener noreferrer">{{ $source->source_url }}</a>
                         </td>
-                        <td><span class="badge badge-soft">{{ $source->source_type }}</span></td>
-                        <td>{{ number_format($source->crawl_interval_minutes) }}分</td>
+                        <td><span class="badge badge-soft">{{ $source->sourceTypeLabel() }}</span></td>
+                        <td>{{ $source->scheduleLabel() }}</td>
                         <td>{{ $source->last_crawled_at?->format('Y-m-d H:i') ?? '-' }}</td>
                         <td>
                             <span class="badge {{ $source->is_active ? 'badge-read' : 'badge-soft' }}">

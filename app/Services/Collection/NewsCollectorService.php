@@ -6,7 +6,11 @@ use App\Models\CollectedItem;
 use App\Models\CollectionError;
 use App\Models\CollectionRun;
 use App\Models\WatchSource;
+use DOMDocument;
+use DOMElement;
+use DOMXPath;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -171,8 +175,7 @@ class NewsCollectorService
         int &$updated,
         int &$errors,
         int &$pdfSaved,
-    ): void
-    {
+    ): void {
         $result = $this->fetchAndParse($source);
         $itemTotal = count($result['items']);
         $sourcePdfSaved = 0;
@@ -246,6 +249,7 @@ class NewsCollectorService
         }
 
         $items = match ($source->source_type) {
+            'auto' => $this->parseAutoSource($source, $response),
             'rss' => $this->rssCollector->parse($response->body(), $source->source_url),
             'html' => $this->htmlCollector->parse($response->body(), $source),
             default => throw new \RuntimeException('未対応の収集方式です: '.$source->source_type),
@@ -255,6 +259,121 @@ class NewsCollectorService
             'http_status' => $response->status(),
             'items' => $items,
         ];
+    }
+
+    /**
+     * 自動判定は、確度の高いRSS/Atomを優先し、見つからない場合だけHTML一覧の推定へ進む。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseAutoSource(WatchSource $source, Response $response): array
+    {
+        $body = $response->body();
+
+        if ($this->looksLikeFeed($body, $response->header('Content-Type'))) {
+            $items = $this->tryParseRss($body, $source->source_url);
+
+            if ($items !== []) {
+                return $items;
+            }
+        }
+
+        $feedUrl = $this->discoverFeedUrl($body, $source->source_url);
+
+        if ($feedUrl) {
+            $feedResponse = Http::timeout(20)
+                ->retry(1, 500)
+                ->withUserAgent('PeerScope/0.1 (+internal news monitoring)')
+                ->accept('application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.8')
+                ->get($feedUrl);
+
+            if ($feedResponse->status() < 400) {
+                $items = $this->tryParseRss($feedResponse->body(), $feedUrl);
+
+                if ($items !== []) {
+                    return $items;
+                }
+            }
+        }
+
+        $items = $this->htmlCollector->parseAuto($body, $source);
+
+        if ($items !== []) {
+            return $items;
+        }
+
+        throw new \RuntimeException('自動判定で取得対象を見つけられませんでした。HTML詳細指定で登録してください。');
+    }
+
+    private function looksLikeFeed(string $body, ?string $contentType): bool
+    {
+        $contentType = strtolower((string) $contentType);
+
+        if (str_contains($contentType, 'rss+xml')
+            || str_contains($contentType, 'atom+xml')
+            || str_contains($contentType, 'text/xml')
+            || str_contains($contentType, 'application/xml')) {
+            return true;
+        }
+
+        $head = strtolower(substr(ltrim($body), 0, 500));
+
+        return str_contains($head, '<rss')
+            || str_contains($head, '<feed')
+            || str_contains($head, '<rdf:rdf');
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function tryParseRss(string $xml, string $baseUrl): array
+    {
+        try {
+            return $this->rssCollector->parse($xml, $baseUrl);
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    private function discoverFeedUrl(string $html, string $baseUrl): ?string
+    {
+        $document = new DOMDocument;
+
+        libxml_use_internal_errors(true);
+        $loaded = $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+
+        if (! $loaded) {
+            return null;
+        }
+
+        $xpath = new DOMXPath($document);
+        $nodes = $xpath->query('//link[@href]');
+
+        foreach ($nodes ?: [] as $node) {
+            if (! $node instanceof DOMElement) {
+                continue;
+            }
+
+            $rel = strtolower($node->getAttribute('rel'));
+            $type = strtolower($node->getAttribute('type'));
+            $href = trim($node->getAttribute('href'));
+
+            if (! str_contains($rel, 'alternate') || $href === '') {
+                continue;
+            }
+
+            $isFeed = str_contains($type, 'rss+xml')
+                || str_contains($type, 'atom+xml')
+                || str_contains($type, 'xml')
+                || preg_match('/(?:rss|atom|feed)[^\/]*\.xml$/i', $href);
+
+            if ($isFeed) {
+                return $this->urlNormalizer->normalize($href, $baseUrl);
+            }
+        }
+
+        return null;
     }
 
     /**

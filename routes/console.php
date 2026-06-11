@@ -9,7 +9,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 app(Schedule::class)->command('peerscope:collect')
-    ->hourly()
+    ->everyMinute()
     ->withoutOverlapping(60);
 
 app(Schedule::class)->command('peerscope:import-users-folder')

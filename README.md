@@ -12,6 +12,7 @@ XAMPPのApache配下で `http://localhost/PeerScope` として動作すること
 - 指定フォルダ配置CSVによるユーザー取込ジョブ
 - 会社マスタ管理
 - 収集先マスタ管理
+- URL自動判定による新着情報収集
 - RSS/HTMLページからの新着情報収集
 - JavaScript配列形式の新着一覧収集
 - JSON形式の新着一覧収集
@@ -155,13 +156,23 @@ action,login_id,name,email,password,role
 | 項目 | 内容 |
 | --- | --- |
 | `source_url` | 収集対象URL |
-| `source_type` | `rss` または `html` |
+| `source_type` | `auto`、`rss`、`html` |
 | `list_selector` | HTML収集時の一覧要素セレクタ |
 | `title_selector` | タイトル要素セレクタ |
 | `url_selector` | URL要素セレクタ |
 | `date_selector` | 日付要素セレクタ |
 | `body_selector` | 本文・概要要素セレクタ |
-| `crawl_interval_minutes` | スケジュール収集間隔 |
+| `schedule_type` | `interval`、`daily`、`weekly`、`monthly` |
+| `crawl_interval_minutes` | 一定間隔実行時の分数 |
+| `schedule_time` | 毎日・毎週・毎月実行時の時刻 |
+| `schedule_weekdays` | 毎週実行時の曜日 |
+| `schedule_month_days` | 毎月実行時の日付 |
+
+### 自動判定収集
+
+`source_type` を `auto` にすると、RSS/Atomフィード、HTML内のフィードリンク、既知形式の新着一覧、日付付きリンク一覧の順に判定して収集します。
+
+自動判定で取得対象を特定できない場合は、`source_type` を `html` にしてCSSセレクタを指定します。
 
 ### RSS収集
 
@@ -272,7 +283,7 @@ peerscope:collect
 peerscope:import-users-folder
 ```
 
-新着収集は1時間ごとに実行します。ユーザーCSVフォルダ取込は毎分確認し、設定した時刻を過ぎていて当日未実行の場合のみ実行します。
+新着収集は毎分確認し、収集先ごとの実行周期に一致した場合のみ実行します。ユーザーCSVフォルダ取込も毎分確認し、設定した時刻を過ぎていて当日未実行の場合のみ実行します。
 
 本番運用ではLaravel SchedulerをOSのcronやタスクスケジューラから毎分起動してください。
 
@@ -328,7 +339,7 @@ php artisan schedule:run
 
 各社のニュースページ、重要なお知らせページ、PDFリンクを含む告知ページなどを収集先として登録できます。
 
-登録時は、対象サイトのHTML構造に合わせてCSSセレクタや `js-news-list` 形式を設定します。
+登録時は `auto` を基本とし、自動判定できない場合だけHTML構造に合わせてCSSセレクタや `js-news-list` 形式を設定します。
 
 ## テスト
 

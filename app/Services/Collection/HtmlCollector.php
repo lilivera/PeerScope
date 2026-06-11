@@ -99,6 +99,79 @@ class HtmlCollector
         return $items;
     }
 
+    /**
+     * URLだけで登録された収集先から、確度の高い新着一覧を推定する。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function parseAuto(string $html, WatchSource $source, int $depth = 0, array $visitedUrls = []): array
+    {
+        $visitedUrls[$source->source_url] = true;
+        $specialParsers = [];
+
+        if (str_contains($html, 'NewsListArray[')
+            || preg_match('/news_list\.js/i', $html)
+            || $this->extractNewsListTargets($html) !== []) {
+            $specialParsers[] = fn (): array => $this->parseJsNewsList($html, $source);
+        }
+
+        if (str_contains($html, '_cmn-newslist') || str_contains($html, 'assets/data/news/list.json')) {
+            $specialParsers[] = fn (): array => $this->parseJsonNewsList($html, $source);
+        }
+
+        foreach ($specialParsers as $parser) {
+            try {
+                $items = $parser();
+
+                if ($items !== []) {
+                    return $items;
+                }
+            } catch (Throwable) {
+                // 自動判定では、特殊形式に見えても失敗した場合は一般HTMLの推定へ進む。
+            }
+        }
+
+        $items = $this->parseGenericNewsList($html, $source);
+
+        if ($items !== []) {
+            return $items;
+        }
+
+        if ($depth >= 2) {
+            return [];
+        }
+
+        foreach ($this->extractSameOriginIframeUrls($html, $source->source_url) as $iframeUrl) {
+            if (isset($visitedUrls[$iframeUrl])) {
+                continue;
+            }
+
+            try {
+                $response = Http::timeout(20)
+                    ->retry(1, 500)
+                    ->withUserAgent('PeerScope/0.1 (+internal news monitoring)')
+                    ->accept('text/html, application/xhtml+xml, */*;q=0.8')
+                    ->get($iframeUrl);
+
+                if ($response->status() >= 400) {
+                    continue;
+                }
+
+                $iframeSource = clone $source;
+                $iframeSource->forceFill(['source_url' => $iframeUrl]);
+                $items = $this->parseAuto($response->body(), $iframeSource, $depth + 1, $visitedUrls);
+
+                if ($items !== []) {
+                    return $items;
+                }
+            } catch (Throwable) {
+                // 埋め込み先が読めない場合でも、ほかの候補を探し続ける。
+            }
+        }
+
+        return [];
+    }
+
     private function query(DOMXPath $xpath, string $selector, ?DOMNode $context = null): iterable
     {
         $expression = $this->converter->toXPath($selector);
@@ -208,6 +281,10 @@ class HtmlCollector
             return Carbon::create((int) $matches[1], (int) $matches[2], (int) $matches[3])->startOfDay();
         }
 
+        if (preg_match('/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/', $value, $matches)) {
+            return Carbon::create((int) $matches[1], (int) $matches[2], (int) $matches[3])->startOfDay();
+        }
+
         try {
             return Carbon::parse($value);
         } catch (Throwable) {
@@ -221,6 +298,293 @@ class HtmlCollector
         $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
 
         return trim($text);
+    }
+
+    /**
+     * 一般的なニュース一覧から、日付に近いリンクを候補として抽出する。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function parseGenericNewsList(string $html, WatchSource $source): array
+    {
+        $document = new DOMDocument;
+
+        libxml_use_internal_errors(true);
+        $loaded = $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+
+        if (! $loaded) {
+            return [];
+        }
+
+        $xpath = new DOMXPath($document);
+        $links = $xpath->query('//a[@href]');
+        $candidates = [];
+        $seenContainers = [];
+        $index = 0;
+
+        foreach ($links ?: [] as $link) {
+            if (! $link instanceof DOMElement || $this->isInsideExcludedArea($link)) {
+                continue;
+            }
+
+            $title = $this->cleanText($link->textContent ?? '');
+            $url = $this->urlNormalizer->normalize($link->getAttribute('href'), $source->source_url);
+
+            if (! $this->isPlausibleNewsTitle($title) || $url === null) {
+                continue;
+            }
+
+            $container = $this->candidateContainer($link);
+            $containerKey = $this->candidateContainerKey($container);
+
+            if ($containerKey && isset($seenContainers[$containerKey])) {
+                continue;
+            }
+
+            $dateText = $this->dateTextNear($container, $link);
+            $publishedAt = $this->parseDate($dateText);
+            $summary = $this->cleanText($container->textContent ?? $title);
+            $score = $this->autoCandidateScore($link, $container, $title, $url, $publishedAt !== null);
+
+            if ($score < 35) {
+                continue;
+            }
+
+            if ($containerKey) {
+                $seenContainers[$containerKey] = true;
+            }
+
+            $candidates[] = [
+                'index' => $index++,
+                'score' => $score,
+                'title' => $title,
+                'url' => $url,
+                'published_at' => $publishedAt,
+                'summary' => Str::limit($summary !== '' ? $summary : $title, 500, '...'),
+                'body_text' => null,
+                'category' => $source->source_name,
+            ];
+        }
+
+        $dated = array_values(array_filter(
+            $candidates,
+            fn (array $candidate): bool => $candidate['published_at'] !== null,
+        ));
+        $items = $dated !== [] ? $dated : $candidates;
+
+        usort($items, fn (array $left, array $right): int => $left['index'] <=> $right['index']);
+
+        return array_map(function (array $item): array {
+            unset($item['index'], $item['score']);
+
+            return $item;
+        }, $items);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractSameOriginIframeUrls(string $html, string $baseUrl): array
+    {
+        $document = new DOMDocument;
+
+        libxml_use_internal_errors(true);
+        $loaded = $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+
+        if (! $loaded) {
+            return [];
+        }
+
+        $baseHost = parse_url($baseUrl, PHP_URL_HOST);
+        $xpath = new DOMXPath($document);
+        $nodes = $xpath->query('//iframe[@src]');
+        $urls = [];
+
+        foreach ($nodes ?: [] as $node) {
+            if (! $node instanceof DOMElement) {
+                continue;
+            }
+
+            $url = $this->urlNormalizer->normalize($node->getAttribute('src'), $baseUrl);
+            $host = $url ? parse_url($url, PHP_URL_HOST) : null;
+
+            if ($url && $host && strtolower($host) === strtolower((string) $baseHost)) {
+                $urls[$url] = true;
+            }
+        }
+
+        return array_keys($urls);
+    }
+
+    private function candidateContainer(DOMElement $link): DOMNode
+    {
+        $node = $link;
+
+        while ($node->parentNode instanceof DOMElement) {
+            $node = $node->parentNode;
+            $tag = strtolower($node->tagName);
+
+            if (in_array($tag, ['li', 'article', 'tr', 'dd', 'dt'], true)) {
+                return $node;
+            }
+
+            if (in_array($tag, ['div', 'section', 'p'], true) && $this->looksLikeNewsContainer($node)) {
+                return $node;
+            }
+
+            if (in_array($tag, ['body', 'html'], true)) {
+                return $link->parentNode instanceof DOMNode ? $link->parentNode : $link;
+            }
+        }
+
+        return $link;
+    }
+
+    private function dateTextNear(DOMNode $container, ?DOMElement $link = null): string
+    {
+        $dateText = $this->extractDateText($this->textWithoutLink($container, $link));
+
+        if ($dateText !== '') {
+            return $dateText;
+        }
+
+        $previous = $this->previousElement($container, '');
+
+        return $this->extractDateText($previous?->textContent ?? '');
+    }
+
+    private function textWithoutLink(DOMNode $container, ?DOMElement $link): string
+    {
+        $text = (string) ($container->textContent ?? '');
+
+        if (! $link) {
+            return $text;
+        }
+
+        $linkText = (string) ($link->textContent ?? '');
+
+        if ($linkText === '') {
+            return $text;
+        }
+
+        return preg_replace('/'.preg_quote($linkText, '/').'/u', '', $text, 1) ?? $text;
+    }
+
+    private function extractDateText(string $text): string
+    {
+        foreach ([
+            '/\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日(?:\s*\d{1,2}:\d{2})?/u',
+            '/\d{4}[.\/-]\d{1,2}[.\/-]\d{1,2}(?:\s+\d{1,2}:\d{2})?/',
+        ] as $pattern) {
+            if (preg_match($pattern, $text, $matches)) {
+                return $matches[0];
+            }
+        }
+
+        return '';
+    }
+
+    private function autoCandidateScore(DOMElement $link, DOMNode $container, string $title, string $url, bool $hasDate): int
+    {
+        $score = $hasDate ? 50 : 0;
+        $titleLength = Str::length($title);
+
+        if ($titleLength >= 8 && $titleLength <= 120) {
+            $score += 10;
+        }
+
+        if ($container instanceof DOMElement && $this->looksLikeNewsContainer($container)) {
+            $score += 15;
+        }
+
+        if (preg_match('/(?:news|notice|topic|topics|info|press|pdf|ir)/i', $url.$this->nodeSignature($link))) {
+            $score += 10;
+        }
+
+        $linkCount = $container instanceof DOMElement ? $container->getElementsByTagName('a')->length : 1;
+
+        if ($linkCount > 8) {
+            $score -= 25;
+        } elseif ($linkCount > 3) {
+            $score -= 10;
+        }
+
+        return $score;
+    }
+
+    private function candidateContainerKey(DOMNode $container): ?string
+    {
+        if (! $container instanceof DOMElement) {
+            return null;
+        }
+
+        if (! in_array(strtolower($container->tagName), ['li', 'article', 'tr', 'dd', 'dt'], true)) {
+            return null;
+        }
+
+        $segments = [];
+        $node = $container;
+
+        while ($node instanceof DOMElement) {
+            $position = 1;
+            $sibling = $node->previousSibling;
+
+            while ($sibling) {
+                if ($sibling instanceof DOMElement && strtolower($sibling->tagName) === strtolower($node->tagName)) {
+                    $position++;
+                }
+
+                $sibling = $sibling->previousSibling;
+            }
+
+            array_unshift($segments, strtolower($node->tagName).'['.$position.']');
+            $node = $node->parentNode instanceof DOMElement ? $node->parentNode : null;
+        }
+
+        return implode('/', $segments);
+    }
+
+    private function isPlausibleNewsTitle(string $title): bool
+    {
+        if ($title === '' || Str::length($title) < 4) {
+            return false;
+        }
+
+        return ! in_array($title, [
+            'TOP',
+            'HOME',
+            '戻る',
+            '一覧',
+            '詳細',
+            'もっと見る',
+            '続きを読む',
+            'PDF',
+        ], true);
+    }
+
+    private function isInsideExcludedArea(DOMElement $node): bool
+    {
+        while ($node->parentNode instanceof DOMElement) {
+            $node = $node->parentNode;
+
+            if (in_array(strtolower($node->tagName), ['nav', 'header', 'footer', 'aside'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function looksLikeNewsContainer(DOMElement $node): bool
+    {
+        return (bool) preg_match('/(?:news|notice|topic|topics|info|press|release|entry|item|list)/i', $this->nodeSignature($node));
+    }
+
+    private function nodeSignature(DOMElement $node): string
+    {
+        return $node->tagName.' '.$node->getAttribute('id').' '.$node->getAttribute('class');
     }
 
     /**

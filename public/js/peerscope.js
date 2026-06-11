@@ -67,6 +67,51 @@
         });
     });
 
+    document.querySelectorAll('[data-watch-source-form]').forEach((form) => {
+        const sourceType = form.querySelector('[data-source-type]');
+        const htmlSettings = form.querySelector('[data-html-settings]');
+        const scheduleType = form.querySelector('[data-schedule-type]');
+        const schedulePanels = form.querySelectorAll('[data-schedule-panel]');
+        const scheduleTimePanel = form.querySelector('[data-schedule-time-panel]');
+        const intervalInput = form.querySelector('#crawl_interval_minutes');
+        const scheduleTimeInput = form.querySelector('#schedule_time');
+        const htmlRequiredInputs = ['#list_selector', '#title_selector', '#url_selector']
+            .map((selector) => form.querySelector(selector))
+            .filter(Boolean);
+
+        const updateSourceSettings = () => {
+            const isHtmlDetail = sourceType?.value === 'html';
+
+            htmlSettings?.classList.toggle('d-none', !isHtmlDetail);
+            htmlRequiredInputs.forEach((input) => {
+                input.required = isHtmlDetail;
+            });
+        };
+
+        const updateScheduleSettings = () => {
+            const selectedType = scheduleType?.value ?? 'interval';
+
+            schedulePanels.forEach((panel) => {
+                panel.classList.toggle('d-none', panel.dataset.schedulePanel !== selectedType);
+            });
+
+            scheduleTimePanel?.classList.toggle('d-none', selectedType === 'interval');
+
+            if (intervalInput) {
+                intervalInput.required = selectedType === 'interval';
+            }
+
+            if (scheduleTimeInput) {
+                scheduleTimeInput.required = selectedType !== 'interval';
+            }
+        };
+
+        sourceType?.addEventListener('change', updateSourceSettings);
+        scheduleType?.addEventListener('change', updateScheduleSettings);
+        updateSourceSettings();
+        updateScheduleSettings();
+    });
+
     const directoryPicker = document.getElementById('directoryPickerModal');
 
     if (directoryPicker) {
