@@ -21,6 +21,9 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/tools/windows-scheduler-runner/*.exe
+/tools/windows-scheduler-runner/*.pdb
+/tools/windows-scheduler-runner/bin
 /vendor
 Homestead.json
 Homestead.yaml

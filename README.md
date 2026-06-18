@@ -299,6 +299,32 @@ peerscope:import-users-folder
 php artisan schedule:run
 ```
 
+### Windowsタスクスケジューラ用Runner
+
+XAMPPのWindows環境でタスクスケジューラから直接 `php artisan schedule:run` を起動すると、1分ごとにコマンド画面が表示される場合があります。
+
+画面表示なしで実行する補助Runnerのソースとセットアップ手順は以下にあります。
+
+```text
+tools/windows-scheduler-runner/
+```
+
+生成される `PeerScopeSchedulerRunner.exe` は環境依存のためGit管理対象外です。既定では `C:\xampp\htdocs\PeerScopeSchedulerRunner` に出力します。
+
+ビルドのみ行う場合は以下を実行します。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-scheduler-runner\build.ps1
+```
+
+ビルドとタスク登録をまとめて行う場合は以下を実行します。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows-scheduler-runner\register-task.ps1
+```
+
+PowerShell 7を使う場合は `powershell` を `pwsh` に置き換えて実行できます。
+
 ## 主要テーブル
 
 | テーブル | 内容 |
