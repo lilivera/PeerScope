@@ -87,7 +87,10 @@
         </div>
     </div>
 
-    <div class="d-flex justify-content-end mb-3">
+    <div class="d-flex justify-content-end gap-2 mb-3">
+        <a class="btn btn-outline-primary" href="{{ route('users.download') }}">
+            <i class="bi bi-download me-1" aria-hidden="true"></i>CSVダウンロード
+        </a>
         <a class="btn btn-primary" href="{{ route('users.create') }}">
             <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>登録
         </a>

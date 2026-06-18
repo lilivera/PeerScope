@@ -101,6 +101,41 @@ class PeerScopeFeatureTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_download_users_as_csv(): void
+    {
+        $systemAdmin = User::factory()->create([
+            'name' => 'System Admin',
+            'login_id' => 'admin',
+            'email' => 'admin@example.com',
+            'role' => 'admin',
+        ]);
+        User::factory()->create([
+            'name' => 'General User',
+            'login_id' => 'general-user',
+            'email' => 'general@example.com',
+            'password' => 'secret-password',
+            'role' => 'user',
+        ]);
+
+        $response = $this->actingAs($systemAdmin)->get(route('users.download'));
+
+        $response->assertOk();
+        $response->assertDownload();
+
+        $csv = $response->streamedContent();
+
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $csv);
+        $this->assertStringContainsString('ログインID', $csv);
+        $this->assertStringContainsString('admin', $csv);
+        $this->assertStringContainsString('System Admin', $csv);
+        $this->assertStringContainsString('general-user', $csv);
+        $this->assertStringContainsString('General User', $csv);
+        $this->assertStringContainsString('管理者', $csv);
+        $this->assertStringContainsString('一般ユーザー', $csv);
+        $this->assertStringNotContainsString('secret-password', $csv);
+        $this->assertStringNotContainsString('パスワード', $csv);
+    }
+
     public function test_user_csv_import_creates_and_deletes_general_users(): void
     {
         $admin = User::factory()->create([
@@ -507,7 +542,8 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
 
             $beforeRun = app(NewsCollectorService::class)->collectDue();
 
-            $this->assertSame(0, $beforeRun->target_count);
+            $this->assertNull($beforeRun);
+            $this->assertDatabaseCount('collection_runs', 0);
             $this->assertDatabaseMissing('collected_items', [
                 'title' => '指定時刻のお知らせ',
             ]);
@@ -517,6 +553,11 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
             $dueRun = app(NewsCollectorService::class)->collectDue();
 
             $this->assertSame(1, $dueRun->target_count);
+            $this->assertDatabaseHas('collection_run_sources', [
+                'collection_run_id' => $dueRun->id,
+                'source_name' => '時刻指定',
+                'source_url' => 'https://example.com/rss.xml',
+            ]);
             $this->assertDatabaseHas('collected_items', [
                 'title' => '指定時刻のお知らせ',
             ]);
@@ -525,7 +566,8 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
 
             $secondRun = app(NewsCollectorService::class)->collectDue();
 
-            $this->assertSame(0, $secondRun->target_count);
+            $this->assertNull($secondRun);
+            $this->assertDatabaseCount('collection_runs', 1);
         } finally {
             Carbon::setTestNow();
         }
@@ -823,10 +865,77 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
         $response->assertRedirect(route('collection-runs.show', $run));
         $this->assertSame('success', $run->status);
         $this->assertSame(1, $run->created_count);
+        $this->assertDatabaseHas('collection_run_sources', [
+            'collection_run_id' => $run->id,
+            'watch_source_id' => $source->id,
+            'company_name' => 'Peer Co',
+            'source_name' => 'ニュース',
+        ]);
         $this->assertDatabaseHas('collected_items', [
             'title' => '手実行のお知らせ',
             'url' => 'https://example.com/manual/1',
         ]);
+
+        $this->actingAs($admin)
+            ->get(route('collection-runs.index'))
+            ->assertOk()
+            ->assertSee('Peer Co / ニュース');
+    }
+
+    public function test_admin_can_download_collection_runs_as_csv(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+
+        $run = CollectionRun::create([
+            'started_at' => Carbon::parse('2026-06-01 09:00:00'),
+            'finished_at' => Carbon::parse('2026-06-01 09:01:00'),
+            'status' => 'success',
+            'target_count' => 1,
+            'created_count' => 2,
+            'updated_count' => 3,
+            'error_count' => 0,
+            'message' => 'CSV出力対象',
+        ]);
+        $run->targetSources()->create([
+            'watch_source_id' => $source->id,
+            'company_name' => 'Peer Co',
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+        ]);
+
+        CollectionRun::create([
+            'started_at' => Carbon::parse('2026-06-01 09:05:00'),
+            'finished_at' => Carbon::parse('2026-06-01 09:05:00'),
+            'status' => 'success',
+            'target_count' => 0,
+            'created_count' => 0,
+            'updated_count' => 0,
+            'error_count' => 0,
+            'message' => '対象なしログ',
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('collection-runs.download'));
+
+        $response->assertOk();
+        $response->assertDownload();
+
+        $csv = $response->streamedContent();
+
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $csv);
+        $this->assertStringContainsString('ログID', $csv);
+        $this->assertStringContainsString('Peer Co / ニュース', $csv);
+        $this->assertStringContainsString('成功', $csv);
+        $this->assertStringContainsString('CSV出力対象', $csv);
+        $this->assertStringNotContainsString('対象なしログ', $csv);
     }
 
     public function test_html_collection_uses_configured_css_selectors(): void

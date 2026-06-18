@@ -33,6 +33,31 @@ class CollectionRun extends Model
         return $this->hasMany(CollectionError::class);
     }
 
+    public function targetSources()
+    {
+        return $this->hasMany(CollectionRunSource::class);
+    }
+
+    public function targetSummary(int $limit = 3): string
+    {
+        $sources = $this->relationLoaded('targetSources')
+            ? $this->targetSources
+            : $this->targetSources()->get();
+
+        if ($sources->isEmpty()) {
+            return '-';
+        }
+
+        $names = $sources
+            ->take($limit)
+            ->map(fn (CollectionRunSource $source): string => $source->displayName())
+            ->all();
+
+        $remaining = $sources->count() - count($names);
+
+        return implode('、', $names).($remaining > 0 ? ' ほか'.$remaining.'件' : '');
+    }
+
     public function statusLabel(): string
     {
         // DBには機械向けの状態値を保存し、画面では日本語ラベルへ変換する。

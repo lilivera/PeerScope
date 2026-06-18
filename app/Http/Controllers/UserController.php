@@ -11,17 +11,57 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserController extends Controller
 {
     public function index()
     {
         return view('users.index', [
-            'users' => User::query()
-                ->orderBy('role')
-                ->orderBy('login_id')
-                ->paginate(50),
+            'users' => $this->orderedUserQuery()->paginate(50),
             'importSetting' => UserImportSetting::current(),
+        ]);
+    }
+
+    public function downloadCsv(): StreamedResponse
+    {
+        $filename = 'users-'.now()->format('YmdHis').'.csv';
+
+        return response()->streamDownload(function (): void {
+            $handle = fopen('php://output', 'w');
+
+            if ($handle === false) {
+                return;
+            }
+
+            // Excelで開いた時に日本語が文字化けしにくいようUTF-8 BOMを付与する。
+            fwrite($handle, "\xEF\xBB\xBF");
+            fputcsv($handle, [
+                'ログインID',
+                '名前',
+                'メールアドレス',
+                '権限',
+                '作成日時',
+                '更新日時',
+            ]);
+
+            // 一覧CSVには認証情報を含めず、画面と同じ並びで監査に必要な項目だけを出す。
+            $this->orderedUserQuery()->chunk(500, function ($users) use ($handle): void {
+                $users->each(function (User $user) use ($handle): void {
+                    fputcsv($handle, [
+                        $user->login_id,
+                        $user->name,
+                        $user->email,
+                        $user->isAdmin() ? '管理者' : '一般ユーザー',
+                        $user->created_at?->format('Y-m-d H:i:s') ?? '',
+                        $user->updated_at?->format('Y-m-d H:i:s') ?? '',
+                    ]);
+                });
+            });
+
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
     }
 
@@ -177,6 +217,13 @@ class UserController extends Controller
         }
 
         return $data;
+    }
+
+    private function orderedUserQuery()
+    {
+        return User::query()
+            ->orderBy('role')
+            ->orderBy('login_id');
     }
 
     private function ensureManagedUser(User $user): void

@@ -5,12 +5,19 @@
 
 @section('content')
     <section class="surface p-3">
+        <div class="d-flex justify-content-end mb-3">
+            <a class="btn btn-outline-primary" href="{{ route('collection-runs.download') }}">
+                <i class="bi bi-download me-1" aria-hidden="true"></i>CSVダウンロード
+            </a>
+        </div>
+
         <div class="table-responsive">
             <table class="table table-hover align-middle">
                 <thead>
                 <tr>
                     <th>実行開始日時</th>
                     <th>実行終了日時</th>
+                    <th>対象収集先</th>
                     <th>ステータス</th>
                     <th class="text-end">対象</th>
                     <th class="text-end">新規</th>
@@ -25,6 +32,7 @@
                     <tr>
                         <td class="text-nowrap">{{ $run->started_at?->format('Y-m-d H:i') }}</td>
                         <td class="text-nowrap">{{ $run->finished_at?->format('Y-m-d H:i') ?? '-' }}</td>
+                        <td>{{ $run->targetSummary() }}</td>
                         <td>
                             <span class="badge {{ $run->statusBadgeClass() }}">
                                 @if($run->status === 'running')
@@ -45,7 +53,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="9" class="empty-state">収集ログはまだありません。</td></tr>
+                    <tr><td colspan="10" class="empty-state">収集ログはまだありません。</td></tr>
                 @endforelse
                 </tbody>
             </table>

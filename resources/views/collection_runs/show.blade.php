@@ -51,6 +51,10 @@
                 <div>{{ number_format($run->error_count) }}</div>
             </div>
             <div class="col-12">
+                <div class="meta-label">対象収集先</div>
+                <div>{{ $run->targetSummary(10) }}</div>
+            </div>
+            <div class="col-12">
                 <div class="meta-label">メッセージ</div>
                 <div>{{ $run->message ?? '-' }}</div>
             </div>
@@ -58,6 +62,36 @@
                 <div class="meta-label">最終更新日時</div>
                 <div>{{ $run->updated_at?->format('Y-m-d H:i:s') ?? '-' }}</div>
             </div>
+        </div>
+    </section>
+
+    <section class="surface p-3 mb-4">
+        <h2 class="h5 mb-3">対象収集先</h2>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                <tr>
+                    <th>会社</th>
+                    <th>収集元</th>
+                    <th>URL</th>
+                </tr>
+                </thead>
+                <tbody>
+                @forelse($run->targetSources as $targetSource)
+                    <tr>
+                        <td>{{ $targetSource->company_name ?? '-' }}</td>
+                        <td>{{ $targetSource->source_name }}</td>
+                        <td>
+                            <a href="{{ $targetSource->source_url }}" target="_blank" rel="noopener noreferrer">
+                                {{ $targetSource->source_url }}
+                            </a>
+                        </td>
+                    </tr>
+                @empty
+                    <tr><td colspan="3" class="empty-state">対象収集先は記録されていません。</td></tr>
+                @endforelse
+                </tbody>
+            </table>
         </div>
     </section>
 

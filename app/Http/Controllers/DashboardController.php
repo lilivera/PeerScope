@@ -20,7 +20,10 @@ class DashboardController extends Controller
             'unreadCount' => CollectedItem::query()
                 ->whereDoesntHave('reads', fn ($query) => $query->where('user_id', $user->id))
                 ->count(),
-            'latestRun' => CollectionRun::query()->latest('finished_at')->first(),
+            'latestRun' => CollectionRun::query()
+                ->where('target_count', '>', 0)
+                ->latest('finished_at')
+                ->first(),
             'errorCount' => CollectionError::query()->where('occurred_at', '>=', now()->subDay())->count(),
             'companyCounts' => Company::query()
                 // 直近7日の件数だけをwithCountで付け、会社別ランキングに使う。

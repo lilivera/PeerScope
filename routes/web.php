@@ -35,6 +35,7 @@ Route::middleware(['auth', 'admin'])->group(function (): void {
     Route::get('/users/import-directories', [UserController::class, 'importDirectories'])->name('users.import-directories');
     Route::post('/users/import-setting', [UserController::class, 'updateImportSetting'])->name('users.import-setting.update');
     Route::post('/users/import-folder/run', [UserController::class, 'runFolderImport'])->name('users.import-folder.run');
+    Route::get('/users.csv', [UserController::class, 'downloadCsv'])->name('users.download');
     Route::resource('users', UserController::class)->except(['show', 'destroy']);
     Route::resource('companies', CompanyController::class)->except(['show', 'destroy']);
     Route::resource('watch-sources', WatchSourceController::class)
@@ -43,5 +44,6 @@ Route::middleware(['auth', 'admin'])->group(function (): void {
     Route::post('/watch-sources/{watchSource}/test', [WatchSourceController::class, 'test'])->name('watch-sources.test');
     Route::post('/watch-sources/{watchSource}/collect', [WatchSourceController::class, 'collect'])->name('watch-sources.collect');
     Route::get('/collection-runs', [CollectionRunController::class, 'index'])->name('collection-runs.index');
+    Route::get('/collection-runs.csv', [CollectionRunController::class, 'downloadCsv'])->name('collection-runs.download');
     Route::get('/collection-runs/{collectionRun}', [CollectionRunController::class, 'show'])->name('collection-runs.show');
 });

@@ -30,7 +30,7 @@ class NewsCollectorService
         private readonly PdfAttachmentDownloader $pdfAttachmentDownloader,
     ) {}
 
-    public function collectDue(): CollectionRun
+    public function collectDue(): ?CollectionRun
     {
         // スケジュール実行では、有効な会社に紐づく有効な収集先だけを対象にする。
         $sources = WatchSource::query()
@@ -40,6 +40,10 @@ class NewsCollectorService
             ->get()
             ->filter(fn (WatchSource $source) => $source->isDue())
             ->values();
+
+        if ($sources->isEmpty()) {
+            return null;
+        }
 
         return $this->collectSources($sources);
     }
@@ -56,7 +60,7 @@ class NewsCollectorService
      */
     public function createRunForSources(Collection $sources, ?string $message = null): CollectionRun
     {
-        return CollectionRun::create([
+        $run = CollectionRun::create([
             'started_at' => now(),
             'status' => 'running',
             'target_count' => $sources->count(),
@@ -65,6 +69,10 @@ class NewsCollectorService
             'error_count' => 0,
             'message' => $message ?? sprintf('対象 %d件の収集を開始しています。', $sources->count()),
         ]);
+
+        $this->syncRunSources($run, $sources);
+
+        return $run;
     }
 
     /**
@@ -74,6 +82,8 @@ class NewsCollectorService
      */
     public function collectRun(CollectionRun $run, Collection $sources): CollectionRun
     {
+        $this->syncRunSources($run, $sources);
+
         $created = 0;
         $updated = 0;
         $errors = 0;
@@ -124,7 +134,7 @@ class NewsCollectorService
             'message' => sprintf('対象 %d件、新規 %d件、更新 %d件、PDF保存 %d件、エラー %d件', $sources->count(), $created, $updated, $pdfSaved, $errors),
         ]);
 
-        return $run->fresh(['errors']);
+        return $run->fresh(['errors', 'targetSources']);
     }
 
     /**
@@ -164,6 +174,27 @@ class NewsCollectorService
     private function collectSources(Collection $sources): CollectionRun
     {
         return $this->collectRun($this->createRunForSources($sources), $sources);
+    }
+
+    /**
+     * 実行ログから収集対象を後で追えるよう、収集先名とURLをスナップショット保存する。
+     *
+     * @param  Collection<int, WatchSource>  $sources
+     */
+    private function syncRunSources(CollectionRun $run, Collection $sources): void
+    {
+        $run->targetSources()->delete();
+
+        $run->targetSources()->createMany(
+            $sources
+                ->map(fn (WatchSource $source): array => [
+                    'watch_source_id' => $source->id,
+                    'company_name' => $source->company?->name,
+                    'source_name' => $source->source_name,
+                    'source_url' => $source->source_url,
+                ])
+                ->all()
+        );
     }
 
     private function collectOne(
