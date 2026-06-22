@@ -4,6 +4,8 @@ WindowsのタスクスケジューラからLaravel Schedulerを実行するた�
 
 `php artisan schedule:run` を画面表示なしで実行するため、1分ごとにコマンド画面が開く問題を避けられます。
 
+ただし、独自にビルドしたexeはWindowsのApplication Controlや端末管理ソフトにブロックされることがあります。通常は `tools/windows-scheduler/` の `php-win.exe` 直接実行方式を使ってください。
+
 ## Git上の扱い
 
 このディレクトリではRunnerのソースとセットアップスクリプトだけを管理します。

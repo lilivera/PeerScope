@@ -5,15 +5,19 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
-// Determine if the application is in maintenance mode...
+require __DIR__.'/../bootstrap/peerscope_runtime.php';
+
+peerscope_prepare_windows_runtime();
+
+// メンテナンスモードかどうかを確認する。
 if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
     require $maintenance;
 }
 
-// Register the Composer autoloader...
+// Composerが用意した自動読み込みを登録する。
 require __DIR__.'/../vendor/autoload.php';
 
-// Bootstrap Laravel and handle the request...
+// Laravelを起動し、HTTPリクエストを処理する。
 /** @var Application $app */
 $app = require_once __DIR__.'/../bootstrap/app.php';
 

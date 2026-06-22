@@ -79,7 +79,10 @@ DB_PORT=3306
 DB_DATABASE=peerscope
 DB_USERNAME=root
 DB_PASSWORD=
+ASSET_URL=/PeerScope/public
 ```
+
+`ASSET_URL` はホスト名を含めず `/PeerScope/public` のようなパスだけにします。`http://localhost/...` を指定すると、他PCからIPアドレスでアクセスした時にCSSやJavaScriptが取得できません。
 
 5. マイグレーションと初期データ投入を実行します。
 
@@ -299,31 +302,25 @@ peerscope:import-users-folder
 php artisan schedule:run
 ```
 
-### Windowsタスクスケジューラ用Runner
+### Windowsタスクスケジューラ
 
-XAMPPのWindows環境でタスクスケジューラから直接 `php artisan schedule:run` を起動すると、1分ごとにコマンド画面が表示される場合があります。
+XAMPPのWindows環境では、タスクスケジューラから `php-win.exe artisan schedule:run` を実行します。`php.exe` ではなく `php-win.exe` を使うことで、毎分コマンド画面が表示されることを避けます。
 
-画面表示なしで実行する補助Runnerのソースとセットアップ手順は以下にあります。
+Windowsでは、通常実行時にSymfony Consoleの端末サイズ判定と開発用パッケージのPHPUnit向け初期化を抑止し、`stty`、`mode CON`、`git describe --tags` による一瞬の画面表示を防ぎます。テスト実行時はPHPUnit向け初期化を有効にします。
+
+セットアップ手順は以下にあります。
 
 ```text
-tools/windows-scheduler-runner/
+tools/windows-scheduler/
 ```
 
-生成される `PeerScopeSchedulerRunner.exe` は環境依存のためGit管理対象外です。既定では `C:\xampp\htdocs\PeerScopeSchedulerRunner` に出力します。
-
-ビルドのみ行う場合は以下を実行します。
+タスク登録は以下で実行できます。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\windows-scheduler-runner\build.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\windows-scheduler\register-task.ps1
 ```
 
-ビルドとタスク登録をまとめて行う場合は以下を実行します。
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\windows-scheduler-runner\register-task.ps1
-```
-
-PowerShell 7を使う場合は `powershell` を `pwsh` に置き換えて実行できます。
+独自にビルドしたexe形式のRunnerはWindowsのApplication Controlにブロックされる場合があるため、通常は使いません。Runnerのソースは `tools/windows-scheduler-runner/` に残しています。
 
 ## 主要テーブル
 
