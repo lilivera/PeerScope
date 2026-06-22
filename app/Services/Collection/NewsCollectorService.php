@@ -39,6 +39,7 @@ class NewsCollectorService
             ->whereHas('company', fn ($query) => $query->where('is_active', true))
             ->get()
             ->filter(fn (WatchSource $source) => $source->isDue())
+            ->reject(fn (WatchSource $source) => $this->runningRunForSource($source) !== null)
             ->values();
 
         if ($sources->isEmpty()) {
@@ -50,7 +51,35 @@ class NewsCollectorService
 
     public function collectSource(WatchSource $source): CollectionRun
     {
+        if ($runningRun = $this->runningRunForSource($source)) {
+            return $runningRun;
+        }
+
         return $this->collectSources(collect([$source->load('company')]));
+    }
+
+    public function runningRunForSource(WatchSource $source, ?CollectionRun $exceptRun = null): ?CollectionRun
+    {
+        return CollectionRun::query()
+            ->where('status', 'running')
+            ->whereHas('targetSources', fn ($query) => $query->where('watch_source_id', $source->id))
+            ->when($exceptRun, fn ($query) => $query->whereKeyNot($exceptRun->id))
+            ->latest('updated_at')
+            ->first();
+    }
+
+    /**
+     * @param  Collection<int, WatchSource>  $sources
+     */
+    public function runningRunForAnySource(Collection $sources, ?CollectionRun $exceptRun = null): ?CollectionRun
+    {
+        foreach ($sources as $source) {
+            if ($runningRun = $this->runningRunForSource($source, $exceptRun)) {
+                return $runningRun;
+            }
+        }
+
+        return null;
     }
 
     /**

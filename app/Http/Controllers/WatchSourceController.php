@@ -73,6 +73,13 @@ class WatchSourceController extends Controller
     public function collect(WatchSource $watchSource, NewsCollectorService $collector, BackgroundArtisanRunner $backgroundRunner)
     {
         $sources = collect([$watchSource->load('company')]);
+
+        if ($runningRun = $collector->runningRunForSource($watchSource)) {
+            return redirect()
+                ->route('collection-runs.show', $runningRun)
+                ->with('status', 'この収集先はすでに実行中です。実行中の収集ログを表示します。');
+        }
+
         // 先に実行ログを作成し、画面をすぐ詳細へ遷移できるようにする。
         $run = $collector->createRunForSources(
             $sources,

@@ -43,6 +43,19 @@ class RunPeerNewsCollection extends Command
                 throw new \RuntimeException('指定された収集先の一部が見つかりません。');
             }
 
+            if ($runningRun = $collector->runningRunForAnySource($sources, $run)) {
+                $run->update([
+                    'finished_at' => now(),
+                    'status' => 'warning',
+                    'target_count' => $sources->count(),
+                    'message' => sprintf('既に実行中の収集ログ #%d があるため、この実行は開始しませんでした。', $runningRun->id),
+                ]);
+
+                $this->warn($run->message);
+
+                return self::SUCCESS;
+            }
+
             $run = $collector->collectRun($run, $sources);
 
             $this->info($run->message ?? '収集処理が完了しました。');

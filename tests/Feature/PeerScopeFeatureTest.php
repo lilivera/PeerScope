@@ -882,6 +882,119 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
             ->assertSee('Peer Co / ニュース');
     }
 
+    public function test_manual_collection_redirects_to_existing_running_run(): void
+    {
+        Http::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $runningRun = CollectionRun::create([
+            'started_at' => now(),
+            'status' => 'running',
+            'target_count' => 1,
+            'message' => '実行中です。',
+        ]);
+        $runningRun->targetSources()->create([
+            'watch_source_id' => $source->id,
+            'company_name' => 'Peer Co',
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('watch-sources.collect', $source));
+
+        $response->assertRedirect(route('collection-runs.show', $runningRun));
+        $response->assertSessionHas('status', 'この収集先はすでに実行中です。実行中の収集ログを表示します。');
+        $this->assertDatabaseCount('collection_runs', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_due_collection_skips_source_already_running(): void
+    {
+        Http::fake();
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $runningRun = CollectionRun::create([
+            'started_at' => now(),
+            'status' => 'running',
+            'target_count' => 1,
+            'message' => '実行中です。',
+        ]);
+        $runningRun->targetSources()->create([
+            'watch_source_id' => $source->id,
+            'company_name' => 'Peer Co',
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+        ]);
+
+        $run = app(NewsCollectorService::class)->collectDue();
+
+        $this->assertNull($run);
+        $this->assertDatabaseCount('collection_runs', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_background_collection_command_skips_source_already_running(): void
+    {
+        Http::fake();
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $runningRun = CollectionRun::create([
+            'started_at' => now(),
+            'status' => 'running',
+            'target_count' => 1,
+            'message' => '実行中です。',
+        ]);
+        $runningRun->targetSources()->create([
+            'watch_source_id' => $source->id,
+            'company_name' => 'Peer Co',
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+        ]);
+        $pendingRun = CollectionRun::create([
+            'started_at' => now(),
+            'status' => 'running',
+            'target_count' => 1,
+            'message' => '起動待ちです。',
+        ]);
+
+        $exitCode = Artisan::call('peerscope:run-collection', [
+            'run' => $pendingRun->id,
+            '--source' => [$source->id],
+        ]);
+
+        $pendingRun->refresh();
+
+        $this->assertSame(0, $exitCode);
+        $this->assertSame('warning', $pendingRun->status);
+        $this->assertStringContainsString('#'.$runningRun->id, $pendingRun->message);
+        Http::assertNothingSent();
+    }
+
     public function test_admin_can_download_collection_runs_as_csv(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
