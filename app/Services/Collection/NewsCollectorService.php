@@ -119,6 +119,10 @@ class NewsCollectorService
         $pdfSaved = 0;
         $sourceNumber = 0;
 
+        if ($this->cancellationRequested($run)) {
+            return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+        }
+
         $this->updateRunProgress(
             $run,
             $created,
@@ -130,8 +134,14 @@ class NewsCollectorService
         foreach ($sources as $source) {
             $sourceNumber++;
 
+            if ($this->cancellationRequested($run)) {
+                return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+            }
+
             try {
-                $this->collectOne($source, $run, $sourceNumber, $sources->count(), $created, $updated, $errors, $pdfSaved);
+                if (! $this->collectOne($source, $run, $sourceNumber, $sources->count(), $created, $updated, $errors, $pdfSaved)) {
+                    return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+                }
             } catch (Throwable $exception) {
                 // 1つの収集先で失敗しても、ほかの収集先まで止めない。
                 $errors++;
@@ -152,6 +162,10 @@ class NewsCollectorService
                     sprintf('[%d/%d] %s: エラーが発生しました。', $sourceNumber, $sources->count(), $source->source_name),
                 );
             }
+        }
+
+        if ($this->cancellationRequested($run)) {
+            return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
         }
 
         $run->update([
@@ -235,20 +249,30 @@ class NewsCollectorService
         int &$updated,
         int &$errors,
         int &$pdfSaved,
-    ): void {
+    ): bool {
+        if ($this->cancellationRequested($run)) {
+            return false;
+        }
+
         $result = $this->fetchAndParse($source);
         $itemTotal = count($result['items']);
         $sourcePdfSaved = 0;
 
-        $this->updateRunProgress(
+        if (! $this->updateRunProgress(
             $run,
             $created,
             $updated,
             $errors,
             sprintf('[%d/%d] %s: %d件を取得しました。', $sourceNumber, $sourceTotal, $source->source_name, $itemTotal),
-        );
+        )) {
+            return false;
+        }
 
         foreach ($result['items'] as $index => $item) {
+            if ($this->cancellationRequested($run)) {
+                return false;
+            }
+
             // 記事レコードは短いトランザクションで保存し、重いPDF取得は外側で実行する。
             $persisted = DB::transaction(fn () => $this->persistItem($source, $item));
             $state = $persisted['state'];
@@ -268,25 +292,35 @@ class NewsCollectorService
             $processed = $index + 1;
 
             if ($this->shouldUpdateProgress($processed, $itemTotal)) {
-                $this->updateRunProgress(
+                if (! $this->updateRunProgress(
                     $run,
                     $created,
                     $updated,
                     $errors,
                     sprintf('[%d/%d] %s: %d/%d件処理中（PDF保存 %d件）', $sourceNumber, $sourceTotal, $source->source_name, $processed, $itemTotal, $sourcePdfSaved),
-                );
+                )) {
+                    return false;
+                }
             }
+        }
+
+        if ($this->cancellationRequested($run)) {
+            return false;
         }
 
         $source->forceFill(['last_crawled_at' => now()])->save();
 
-        $this->updateRunProgress(
+        if (! $this->updateRunProgress(
             $run,
             $created,
             $updated,
             $errors,
             sprintf('[%d/%d] %s: 完了 %d件（PDF保存 %d件）', $sourceNumber, $sourceTotal, $source->source_name, $itemTotal, $sourcePdfSaved),
-        );
+        )) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -515,13 +549,51 @@ class NewsCollectorService
             || $processed === $total;
     }
 
-    private function updateRunProgress(CollectionRun $run, int $created, int $updated, int $errors, string $message): void
+    private function updateRunProgress(CollectionRun $run, int $created, int $updated, int $errors, string $message): bool
     {
+        if ($this->cancellationRequested($run)) {
+            return false;
+        }
+
         $run->forceFill([
             'created_count' => $created,
             'updated_count' => $updated,
             'error_count' => $errors,
             'message' => $message,
         ])->save();
+
+        return true;
+    }
+
+    private function cancellationRequested(CollectionRun $run): bool
+    {
+        return $run->refresh()->status === 'cancelled';
+    }
+
+    private function finishCancelledRun(CollectionRun $run, int $created, int $updated, int $errors, int $pdfSaved): CollectionRun
+    {
+        $this->touchCancelledRunSources($run);
+
+        $run->forceFill([
+            'finished_at' => $run->finished_at ?? now(),
+            'status' => 'cancelled',
+            'created_count' => $created,
+            'updated_count' => $updated,
+            'error_count' => $errors,
+            'message' => sprintf('中断しました。新規 %d件、更新 %d件、PDF保存 %d件、エラー %d件', $created, $updated, $pdfSaved, $errors),
+        ])->save();
+
+        return $run->fresh(['errors', 'targetSources']);
+    }
+
+    private function touchCancelledRunSources(CollectionRun $run): void
+    {
+        $sourceIds = $run->targetSources()
+            ->whereNotNull('watch_source_id')
+            ->pluck('watch_source_id');
+
+        if ($sourceIds->isNotEmpty()) {
+            WatchSource::query()->whereKey($sourceIds)->update(['last_crawled_at' => now()]);
+        }
     }
 }

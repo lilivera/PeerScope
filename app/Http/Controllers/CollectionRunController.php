@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\CollectionRun;
+use App\Models\WatchSource;
+use App\Support\CollectionProcessTerminator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CollectionRunController extends Controller
@@ -78,5 +80,41 @@ class CollectionRunController extends Controller
         $collectionRun->load(['targetSources', 'errors.watchSource.company']);
 
         return view('collection_runs.show', ['run' => $collectionRun]);
+    }
+
+    public function cancel(CollectionRun $collectionRun, CollectionProcessTerminator $terminator)
+    {
+        if ($collectionRun->status !== 'running') {
+            return redirect()
+                ->route('collection-runs.show', $collectionRun)
+                ->with('status', 'この収集ログは既に終了しています。');
+        }
+
+        $terminated = $terminator->terminate($collectionRun);
+
+        $collectionRun->update([
+            'finished_at' => now(),
+            'status' => 'cancelled',
+            'message' => $terminated
+                ? '中断しました。実行中の収集プロセスを停止しました。'
+                : '中断要求を受け付けました。現在の処理単位が終わり次第停止します。',
+        ]);
+
+        $this->touchTargetSources($collectionRun);
+
+        return redirect()
+            ->route('collection-runs.show', $collectionRun)
+            ->with('status', '収集ログを中断しました。');
+    }
+
+    private function touchTargetSources(CollectionRun $collectionRun): void
+    {
+        $sourceIds = $collectionRun->targetSources()
+            ->whereNotNull('watch_source_id')
+            ->pluck('watch_source_id');
+
+        if ($sourceIds->isNotEmpty()) {
+            WatchSource::query()->whereKey($sourceIds)->update(['last_crawled_at' => now()]);
+        }
     }
 }

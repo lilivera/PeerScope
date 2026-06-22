@@ -66,6 +66,7 @@ class CollectionRun extends Model
             'success' => '成功',
             'warning' => '一部失敗',
             'failed' => '失敗',
+            'cancelled' => '中断',
             default => $this->status,
         };
     }
@@ -78,6 +79,7 @@ class CollectionRun extends Model
             'success' => 'text-bg-success',
             'warning' => 'text-bg-warning',
             'failed' => 'text-bg-danger',
+            'cancelled' => 'text-bg-secondary',
             default => 'text-bg-secondary',
         };
     }

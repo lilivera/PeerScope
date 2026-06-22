@@ -47,9 +47,19 @@
                         <td class="text-end">{{ number_format($run->error_count) }}</td>
                         <td>{{ $run->message }}</td>
                         <td class="text-end">
-                            <a class="btn btn-sm btn-outline-primary" href="{{ route('collection-runs.show', $run) }}">
-                                <i class="bi bi-eye" aria-hidden="true"></i>
-                            </a>
+                            <div class="d-inline-flex gap-1">
+                                @if($run->status === 'running')
+                                    <form method="post" action="{{ route('collection-runs.cancel', $run) }}" onsubmit="return confirm('この収集処理を中断しますか？');">
+                                        @csrf
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="中断">
+                                            <i class="bi bi-stop-circle" aria-hidden="true"></i>
+                                        </button>
+                                    </form>
+                                @endif
+                                <a class="btn btn-sm btn-outline-primary" href="{{ route('collection-runs.show', $run) }}" title="詳細">
+                                    <i class="bi bi-eye" aria-hidden="true"></i>
+                                </a>
+                            </div>
                         </td>
                     </tr>
                 @empty

@@ -6,8 +6,14 @@
 @section('content')
     @if($run->status === 'running')
         <div class="alert alert-primary d-flex align-items-center gap-2" role="alert">
-            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <span>収集処理を実行中です。進捗は自動更新されます。</span>
+            <span class="spinner-border spinner-border-sm flex-shrink-0" aria-hidden="true"></span>
+            <span class="me-auto">収集処理を実行中です。進捗は自動更新されます。</span>
+            <form method="post" action="{{ route('collection-runs.cancel', $run) }}" onsubmit="return confirm('この収集処理を中断しますか？');">
+                @csrf
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-stop-circle me-1" aria-hidden="true"></i>中断
+                </button>
+            </form>
         </div>
     @endif
 

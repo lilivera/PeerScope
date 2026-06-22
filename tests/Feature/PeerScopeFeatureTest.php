@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\UserImportSetting;
 use App\Models\WatchSource;
 use App\Services\Collection\NewsCollectorService;
+use App\Support\CollectionProcessTerminator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -992,6 +993,77 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
         $this->assertSame(0, $exitCode);
         $this->assertSame('warning', $pendingRun->status);
         $this->assertStringContainsString('#'.$runningRun->id, $pendingRun->message);
+        Http::assertNothingSent();
+    }
+
+    public function test_admin_can_cancel_running_collection_run(): void
+    {
+        $this->mock(CollectionProcessTerminator::class, function ($mock): void {
+            $mock->shouldReceive('terminate')->once()->andReturn(true);
+        });
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $run = CollectionRun::create([
+            'started_at' => now(),
+            'status' => 'running',
+            'target_count' => 1,
+            'message' => '実行中です。',
+        ]);
+        $run->targetSources()->create([
+            'watch_source_id' => $source->id,
+            'company_name' => 'Peer Co',
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('collection-runs.cancel', $run));
+
+        $response->assertRedirect(route('collection-runs.show', $run));
+        $response->assertSessionHas('status', '収集ログを中断しました。');
+
+        $run->refresh();
+
+        $this->assertSame('cancelled', $run->status);
+        $this->assertNotNull($run->finished_at);
+        $this->assertSame('中断しました。実行中の収集プロセスを停止しました。', $run->message);
+        $this->assertNotNull($source->fresh()->last_crawled_at);
+    }
+
+    public function test_cancelled_collection_run_stops_before_fetching_source(): void
+    {
+        Http::fake();
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $run = CollectionRun::create([
+            'started_at' => now(),
+            'status' => 'cancelled',
+            'target_count' => 1,
+            'message' => '中断要求を受け付けました。',
+        ]);
+
+        $finishedRun = app(NewsCollectorService::class)->collectRun($run, collect([$source->load('company')]));
+
+        $this->assertSame('cancelled', $finishedRun->status);
+        $this->assertNotNull($finishedRun->finished_at);
+        $this->assertStringContainsString('中断しました。', $finishedRun->message);
+        $this->assertNotNull($source->fresh()->last_crawled_at);
         Http::assertNothingSent();
     }
 

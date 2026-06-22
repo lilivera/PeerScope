@@ -45,5 +45,6 @@ Route::middleware(['auth', 'admin'])->group(function (): void {
     Route::post('/watch-sources/{watchSource}/collect', [WatchSourceController::class, 'collect'])->name('watch-sources.collect');
     Route::get('/collection-runs', [CollectionRunController::class, 'index'])->name('collection-runs.index');
     Route::get('/collection-runs.csv', [CollectionRunController::class, 'downloadCsv'])->name('collection-runs.download');
+    Route::post('/collection-runs/{collectionRun}/cancel', [CollectionRunController::class, 'cancel'])->name('collection-runs.cancel');
     Route::get('/collection-runs/{collectionRun}', [CollectionRunController::class, 'show'])->name('collection-runs.show');
 });
