@@ -35,4 +35,17 @@ return [
         ],
     ],
 
+    'ollama' => [
+        'base_url' => env('OLLAMA_BASE_URL', 'http://127.0.0.1:11434'),
+        'model' => env('OLLAMA_MODEL', 'gemma4:e2b'),
+        'timeout' => env('OLLAMA_TIMEOUT', 180),
+        'connect_timeout' => env('OLLAMA_CONNECT_TIMEOUT', 5),
+        'fetch_timeout' => env('OLLAMA_FETCH_TIMEOUT', 20),
+        'num_predict' => env('OLLAMA_NUM_PREDICT', 420),
+        'max_input_chars' => env('OLLAMA_MAX_INPUT_CHARS', 12000),
+        'extracted_text_chars' => env('OLLAMA_EXTRACTED_TEXT_CHARS', 12000),
+        'keep_alive' => env('OLLAMA_KEEP_ALIVE', '5m'),
+        'think' => env('OLLAMA_THINK', false),
+    ],
+
 ];

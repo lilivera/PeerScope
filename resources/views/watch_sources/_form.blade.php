@@ -47,10 +47,14 @@
                     <option value="html" @selected($sourceType === 'html')>HTML詳細指定</option>
                 </select>
             </div>
-            <div class="col-md-6 d-flex align-items-end">
-                <div class="form-check form-switch mb-2">
+            <div class="col-md-6 d-flex flex-column justify-content-end gap-2">
+                <div class="form-check form-switch">
                     <input class="form-check-input" id="is_active" name="is_active" type="checkbox" value="1" @checked(old('is_active', $source->is_active))>
                     <label class="form-check-label" for="is_active">有効</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" id="auto_ai_summary" name="auto_ai_summary" type="checkbox" value="1" @checked(old('auto_ai_summary', $source->auto_ai_summary))>
+                    <label class="form-check-label" for="auto_ai_summary">ジョブ実行時にAI要約する</label>
                 </div>
             </div>
 

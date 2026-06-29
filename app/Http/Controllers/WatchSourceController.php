@@ -31,6 +31,7 @@ class WatchSourceController extends Controller
                 'crawl_interval_minutes' => 60,
                 'schedule_type' => 'daily',
                 'schedule_time' => '09:00',
+                'auto_ai_summary' => false,
                 'is_active' => true,
             ]),
             'companies' => $this->companies(),
@@ -138,6 +139,7 @@ class WatchSourceController extends Controller
         ]);
 
         $data['is_active'] = $request->boolean('is_active');
+        $data['auto_ai_summary'] = $request->boolean('auto_ai_summary');
 
         return $this->normalizeScheduleData($data);
     }

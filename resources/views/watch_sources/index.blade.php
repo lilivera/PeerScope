@@ -19,6 +19,7 @@
                     <th>収集元名</th>
                     <th>方式</th>
                     <th>実行周期</th>
+                    <th>AI要約</th>
                     <th>最終収集日時</th>
                     <th>有効区分</th>
                     <th class="text-end">新着</th>
@@ -35,6 +36,11 @@
                         </td>
                         <td><span class="badge badge-soft">{{ $source->sourceTypeLabel() }}</span></td>
                         <td>{{ $source->scheduleLabel() }}</td>
+                        <td>
+                            <span class="badge {{ $source->auto_ai_summary ? 'badge-read' : 'badge-soft' }}">
+                                {{ $source->auto_ai_summary ? '自動' : '手動' }}
+                            </span>
+                        </td>
                         <td>{{ $source->last_crawled_at?->format('Y-m-d H:i') ?? '-' }}</td>
                         <td>
                             <span class="badge {{ $source->is_active ? 'badge-read' : 'badge-soft' }}">
@@ -63,7 +69,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="8" class="empty-state">収集先はまだ登録されていません。</td></tr>
+                    <tr><td colspan="9" class="empty-state">収集先はまだ登録されていません。</td></tr>
                 @endforelse
                 </tbody>
             </table>

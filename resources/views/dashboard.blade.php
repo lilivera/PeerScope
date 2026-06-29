@@ -121,7 +121,7 @@
                                 <td class="text-nowrap">{{ $item->detected_at?->format('Y-m-d H:i') }}</td>
                                 <td>{{ $item->company?->name }}</td>
                                 <td class="table-title">
-                                    <a href="{{ route('items.show', $item) }}">{{ $item->title }}</a>
+                                    <a href="{{ route('items.show', ['item' => $item, 'return_to' => request()->fullUrl()]) }}">{{ $item->title }}</a>
                                 </td>
                             </tr>
                         @empty

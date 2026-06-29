@@ -25,6 +25,7 @@ class WatchSource extends Model
         'schedule_time',
         'schedule_weekdays',
         'schedule_month_days',
+        'auto_ai_summary',
         'last_crawled_at',
         'is_active',
     ];
@@ -35,6 +36,7 @@ class WatchSource extends Model
             'crawl_interval_minutes' => 'integer',
             'schedule_weekdays' => 'array',
             'schedule_month_days' => 'array',
+            'auto_ai_summary' => 'boolean',
             'last_crawled_at' => 'datetime',
             'is_active' => 'boolean',
         ];

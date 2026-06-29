@@ -98,7 +98,7 @@
                         <td class="text-nowrap" data-sort-value="{{ $item->detected_at?->timestamp ?? 0 }}">{{ $item->detected_at?->format('Y-m-d H:i') }}</td>
                         <td class="text-nowrap" data-sort-value="{{ $item->published_at?->timestamp ?? 0 }}">{{ $item->published_at?->format('Y-m-d') ?? '-' }}</td>
                         <td data-sort-value="{{ $item->company?->name ?? '' }}">{{ $item->company?->name }}</td>
-                        <td class="table-title" data-sort-value="{{ $item->title }}"><a href="{{ route('items.show', $item) }}">{{ $item->title }}</a></td>
+                        <td class="table-title" data-sort-value="{{ $item->title }}"><a href="{{ route('items.show', ['item' => $item, 'return_to' => request()->fullUrl()]) }}">{{ $item->title }}</a></td>
                         <td data-sort-value="{{ $item->url }}">
                             <div class="d-inline-flex gap-1">
                                 <a class="btn btn-sm btn-outline-secondary" href="{{ $item->url }}" target="_blank" rel="noopener noreferrer" title="元URL">

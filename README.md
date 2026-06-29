@@ -20,6 +20,9 @@ XAMPPのApache配下で `http://localhost/PeerScope` として動作すること
 - PDFリンクの自動保存と認証付きダウンロード
 - 新着一覧の検索・会社絞り込み・日付絞り込み・既読絞り込み
 - 記事詳細表示時の自動既読化
+- Ollamaを使った記事詳細のAI要約生成
+- AI要約用のリンク先HTML本文抽出、保存済みPDF本文抽出
+- 収集ジョブ実行時のAI要約自動生成
 - 収集ログ、収集エラーの確認
 - 収集ログのCSVダウンロード
 - 手動収集とスケジュール収集
@@ -33,6 +36,8 @@ XAMPPのApache配下で `http://localhost/PeerScope` として動作すること
 - Bootstrap 5
 - Bootstrap Icons
 - Symfony CSS Selector
+- Smalot PDF Parser
+- Ollama
 - XAMPP Apache
 
 ## ディレクトリ概要
@@ -80,9 +85,21 @@ DB_DATABASE=peerscope
 DB_USERNAME=root
 DB_PASSWORD=
 ASSET_URL=/PeerScope/public
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=gemma4:e2b
+OLLAMA_TIMEOUT=180
+OLLAMA_CONNECT_TIMEOUT=5
+OLLAMA_FETCH_TIMEOUT=20
+OLLAMA_NUM_PREDICT=420
+OLLAMA_MAX_INPUT_CHARS=12000
+OLLAMA_EXTRACTED_TEXT_CHARS=12000
+OLLAMA_KEEP_ALIVE=5m
+OLLAMA_THINK=false
 ```
 
 `ASSET_URL` はホスト名を含めず `/PeerScope/public` のようなパスだけにします。`http://localhost/...` を指定すると、他PCからIPアドレスでアクセスした時にCSSやJavaScriptが取得できません。
+
+AI要約を使う場合はOllamaを起動し、`.env` の `OLLAMA_MODEL` に利用するモデル名を設定します。既定は `gemma4:e2b` です。初回のモデル読み込みや長めの記事では時間がかかるため、`OLLAMA_TIMEOUT` は180秒を既定にしています。要約の具体性を確保するため、リンク先HTML本文や抽出可能な保存済みPDF本文もAIへ渡します。thinking対応モデルで空応答になることを避けるため、要約用途では `OLLAMA_THINK=false` を既定にしています。
 
 5. マイグレーションと初期データ投入を実行します。
 
@@ -178,6 +195,7 @@ action,login_id,name,email,password,role
 | `schedule_time` | 毎日・毎週・毎月実行時の時刻 |
 | `schedule_weekdays` | 毎週実行時の曜日 |
 | `schedule_month_days` | 毎月実行時の日付 |
+| `auto_ai_summary` | 収集ジョブ実行時に新規・更新記事へAI要約を自動生成するか |
 
 ### 自動判定収集
 
@@ -238,6 +256,14 @@ URLパスが `.pdf` で終わるリンクは、記事保存後にPDFとして取
 PDFは `storage/app/private/pdfs/{company_id}/` 配下に保存され、画面のダウンロード機能を通じて認証済みユーザーだけが取得できます。
 
 PDF取得に失敗しても記事収集全体は止めません。
+
+### 収集時AI要約
+
+収集先ごとに「ジョブ実行時にAI要約する」を有効化できます。
+
+有効な収集先では、収集ジョブで新規作成または更新された記事に対してOllamaのAI要約を生成し、`collected_items.ai_summary` に保存します。既に変更のない記事は毎回再要約しません。
+
+AI要約生成に失敗しても記事収集全体は止めず、収集エラーとして記録します。AI要約はリンク先HTML本文や抽出可能な保存済みPDF本文も材料にするため、記事数が多い収集先ではジョブ時間が長くなる場合があります。
 
 ## 手動収集
 
@@ -356,6 +382,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\windows-scheduler\register
 ### 新着詳細
 
 - 記事本文・概要を表示
+- AI要約を生成し、生成済みの場合はAI要約を優先表示
+- AI要約の生成中はボタンとメッセージで処理中状態を表示
+- AI要約では保存済み本文、リンク先HTML本文、抽出可能な保存済みPDF本文を材料にする
+- 要約に必要な本文を抽出できない場合は、タイトルだけの薄い要約を作らずエラー表示する
+- AI要約生成に失敗した場合は収集時の概要を表示
 - 元ページへのリンクを表示
 - PDF保存済みの場合はダウンロードボタンを表示
 - 詳細表示時に既読登録

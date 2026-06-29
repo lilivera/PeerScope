@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\User;
 use App\Models\UserImportSetting;
 use App\Models\WatchSource;
+use App\Services\Ai\ArticleTextExtractor;
 use App\Services\Collection\NewsCollectorService;
 use App\Support\CollectionProcessTerminator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -445,6 +446,244 @@ class PeerScopeFeatureTest extends TestCase
         ]);
     }
 
+    public function test_user_can_generate_ai_summary_for_item(): void
+    {
+        config([
+            'services.ollama.base_url' => 'http://ollama.test',
+            'services.ollama.model' => 'gemma4:e2b',
+            'services.ollama.extracted_text_chars' => 2000,
+        ]);
+        Http::fake([
+            'https://example.com/news/ai-summary' => Http::response(<<<'HTML'
+                <html>
+                    <body>
+                        <header>共通ナビ</header>
+                        <main>
+                            <h1>サービス変更のお知らせ</h1>
+                            <p>2026年7月1日から利用者向けサービスの受付時間を平日9時から17時までに変更します。</p>
+                            <p>対象者はサービスを利用する契約者で、変更前に手続きの締切日と利用可能時間を確認する必要があります。</p>
+                            <p>問い合わせ先はサポート窓口です。</p>
+                        </main>
+                    </body>
+                </html>
+            HTML, 200, ['Content-Type' => 'text/html']),
+            'http://ollama.test/api/generate' => Http::response([
+                'response' => "はい、承知いたしました。この文章を要約します。\n\n概要: 利用者向けサービスの受付時間変更を知らせる記事です。\n主な内容: AI検索専用語を含む受付時間が平日9時から17時までに変わります。\n対象・日付: 対象は契約者で、開始日は2026年7月1日です。\n確認事項: 手続きの締切日と利用可能時間を事前に確認する必要があります。",
+            ], 200),
+        ]);
+
+        $user = User::factory()->create(['role' => 'user']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $item = CollectedItem::create([
+            'company_id' => $company->id,
+            'watch_source_id' => $source->id,
+            'title' => 'サービス変更のお知らせ',
+            'url' => 'https://example.com/news/ai-summary',
+            'url_hash' => hash('sha256', 'https://example.com/news/ai-summary'),
+            'content_hash' => hash('sha256', 'サービス変更のお知らせ'),
+            'detected_at' => now(),
+            'summary' => 'サービス変更について',
+            'body_text' => '2026年7月1日から利用者向けサービスの受付時間を変更します。対象者は事前に確認してください。',
+        ]);
+
+        $returnTo = route('items.index', ['company_id' => $company->id]);
+
+        $response = $this->actingAs($user)->post(route('items.ai-summary', $item), [
+            'return_to' => $returnTo,
+        ]);
+
+        $response->assertRedirect(route('items.show', ['item' => $item, 'return_to' => $returnTo]));
+        $response->assertSessionHas('status', 'AI要約を生成しました。');
+
+        $item->refresh();
+
+        $this->assertSame("概要: 利用者向けサービスの受付時間変更を知らせる記事です。\n主な内容: AI検索専用語を含む受付時間が平日9時から17時までに変わります。\n対象・日付: 対象は契約者で、開始日は2026年7月1日です。\n確認事項: 手続きの締切日と利用可能時間を事前に確認する必要があります。", $item->ai_summary);
+        $this->assertSame('gemma4:e2b', $item->ai_summary_model);
+        $this->assertNotNull($item->ai_summary_generated_at);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'http://ollama.test/api/generate'
+            && $request['model'] === 'gemma4:e2b'
+            && $request['stream'] === false
+            && $request['think'] === false
+            && $request['options']['num_predict'] === 420
+            && str_contains($request['prompt'], 'サービス変更のお知らせ')
+            && str_contains($request['prompt'], '平日9時から17時')
+            && str_contains($request['prompt'], '主な内容'));
+
+        $this->actingAs($user)
+            ->get(route('items.show', ['item' => $item, 'return_to' => $returnTo]))
+            ->assertOk()
+            ->assertSee('href="'.$returnTo.'"', false)
+            ->assertSee('name="return_to" value="'.$returnTo.'"', false)
+            ->assertSee('data-ai-summary-form', false)
+            ->assertSee('AI要約を生成しています。完了までこの画面のままお待ちください。')
+            ->assertSee('受付時間が平日9時から17時までに変わります。')
+            ->assertSee('AI要約を再生成');
+
+        $this->actingAs($user)
+            ->get(route('items.index', ['q' => 'AI検索専用語']))
+            ->assertOk()
+            ->assertSee('サービス変更のお知らせ');
+    }
+
+    public function test_ai_summary_generation_failure_keeps_original_summary(): void
+    {
+        config([
+            'services.ollama.base_url' => 'http://ollama.test',
+            'services.ollama.model' => 'gemma4:e2b',
+        ]);
+        Http::fake([
+            'https://example.com/news/ai-summary-failed' => Http::response('', 404),
+            'http://ollama.test/api/generate' => Http::response(['error' => 'model error'], 500),
+        ]);
+
+        $user = User::factory()->create(['role' => 'user']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $item = CollectedItem::create([
+            'company_id' => $company->id,
+            'watch_source_id' => $source->id,
+            'title' => '要約失敗のお知らせ',
+            'url' => 'https://example.com/news/ai-summary-failed',
+            'url_hash' => hash('sha256', 'https://example.com/news/ai-summary-failed'),
+            'content_hash' => hash('sha256', '要約失敗のお知らせ'),
+            'detected_at' => now(),
+            'summary' => '元の要約',
+        ]);
+
+        $response = $this->actingAs($user)->from(route('items.show', $item))->post(route('items.ai-summary', $item));
+
+        $response->assertRedirect(route('items.show', $item));
+        $response->assertSessionHasErrors('ai_summary');
+
+        $this->assertNull($item->fresh()->ai_summary);
+        $this->actingAs($user)
+            ->get(route('items.show', $item))
+            ->assertOk()
+            ->assertSee('元の要約');
+    }
+
+    public function test_ai_summary_rejects_too_short_model_response(): void
+    {
+        config([
+            'services.ollama.base_url' => 'http://ollama.test',
+            'services.ollama.model' => 'gemma4:e2b',
+        ]);
+        Http::fake([
+            'https://example.com/news/ai-summary-too-short' => Http::response('', 404),
+            'http://ollama.test/api/generate' => Http::response(['response' => 'The'], 200),
+        ]);
+
+        $user = User::factory()->create(['role' => 'user']);
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $item = CollectedItem::create([
+            'company_id' => $company->id,
+            'watch_source_id' => $source->id,
+            'title' => '短すぎるAI応答のお知らせ',
+            'url' => 'https://example.com/news/ai-summary-too-short',
+            'url_hash' => hash('sha256', 'https://example.com/news/ai-summary-too-short'),
+            'content_hash' => hash('sha256', '短すぎるAI応答のお知らせ'),
+            'detected_at' => now(),
+            'summary' => '2026年7月1日から利用者向けサービスの受付時間を変更します。対象者は契約者で、手続きの締切日と利用可能時間を確認する必要があります。',
+        ]);
+
+        $response = $this->actingAs($user)
+            ->from(route('items.show', $item))
+            ->post(route('items.ai-summary', $item));
+
+        $response->assertRedirect(route('items.show', $item));
+        $response->assertSessionHasErrors('ai_summary');
+
+        $this->assertNull($item->fresh()->ai_summary);
+    }
+
+    public function test_ai_summary_text_extractor_reads_pdf_to_unicode_cmap(): void
+    {
+        Storage::disk('local')->put('pdfs/test/cmap.pdf', <<<'PDF'
+%PDF-1.4
+1 0 obj
+<< /Resources << /Font << /F0 2 0 R >> >> /Contents 3 0 R >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /TestFont /Encoding /Identity-H /ToUnicode 4 0 R >>
+endobj
+3 0 obj
+<< /Length 120 >>
+stream
+BT
+/F0 12 Tf
+<0001000200030004000100020003000400010002000300040001000200030004000100020003000400010002000300040001000200030004000100020003> Tj
+ET
+endstream
+endobj
+4 0 obj
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+1 begincodespacerange
+<0001> <0004>
+endcodespacerange
+4 beginbfchar
+<0001> <65E5>
+<0002> <672C>
+<0003> <8A9E>
+<0004> <0020>
+endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endobj
+%%EOF
+PDF);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/news.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'is_active' => true,
+        ]);
+        $item = CollectedItem::create([
+            'company_id' => $company->id,
+            'watch_source_id' => $source->id,
+            'title' => 'PDF文字マップのお知らせ',
+            'url' => 'https://example.com/docs/cmap.pdf',
+            'url_hash' => hash('sha256', 'https://example.com/docs/cmap.pdf'),
+            'content_hash' => hash('sha256', 'PDF文字マップのお知らせ'),
+            'detected_at' => now(),
+            'pdf_storage_path' => 'pdfs/test/cmap.pdf',
+            'pdf_original_filename' => 'cmap.pdf',
+            'pdf_mime_type' => 'application/pdf',
+            'pdf_file_size' => Storage::disk('local')->size('pdfs/test/cmap.pdf'),
+            'pdf_downloaded_at' => now(),
+        ]);
+
+        $extracted = app(ArticleTextExtractor::class)->extract($item);
+
+        $this->assertStringContainsString('日本語 日本語 日本語', (string) $extracted['pdf']);
+    }
+
     public function test_items_index_orders_by_newest_published_date_first(): void
     {
         $user = User::factory()->create(['role' => 'user']);
@@ -497,6 +736,7 @@ class PeerScopeFeatureTest extends TestCase
             'schedule_type' => 'weekly',
             'schedule_time' => '13:15',
             'schedule_weekdays' => ['1', '5'],
+            'auto_ai_summary' => '1',
             'is_active' => '1',
         ])->assertRedirect(route('watch-sources.index'));
 
@@ -506,7 +746,113 @@ class PeerScopeFeatureTest extends TestCase
         $this->assertSame('weekly', $source->schedule_type);
         $this->assertSame('13:15', $source->schedule_time);
         $this->assertSame([1, 5], $source->schedule_weekdays);
+        $this->assertTrue($source->auto_ai_summary);
         $this->assertNull($source->list_selector);
+
+        $this->actingAs($admin)
+            ->get(route('watch-sources.index'))
+            ->assertOk()
+            ->assertSee('AI要約')
+            ->assertSee('自動');
+    }
+
+    public function test_collection_job_can_generate_ai_summary_automatically(): void
+    {
+        config([
+            'services.ollama.base_url' => 'http://ollama.test',
+            'services.ollama.model' => 'gemma4:e2b',
+        ]);
+        Http::fake([
+            'https://example.com/rss.xml' => Http::response(<<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>自動AI要約のお知らせ</title>
+      <link>https://example.com/ai/1</link>
+      <pubDate>Mon, 01 Jun 2026 09:00:00 +0900</pubDate>
+      <description>2026年7月1日から利用者向けサービスの受付時間を変更します。対象者は契約者です。</description>
+    </item>
+  </channel>
+</rss>
+XML, 200, ['Content-Type' => 'application/rss+xml']),
+            'https://example.com/ai/1' => Http::response(<<<'HTML'
+<html>
+  <body>
+    <main>
+      <p>2026年7月1日から利用者向けサービスの受付時間を平日9時から17時までに変更します。</p>
+      <p>対象者は契約者で、手続きの締切日と利用可能時間を事前に確認する必要があります。</p>
+    </main>
+  </body>
+</html>
+HTML, 200, ['Content-Type' => 'text/html']),
+            'http://ollama.test/api/generate' => Http::response([
+                'response' => "概要: 利用者向けサービスの受付時間変更を知らせる記事です。\n主な内容: 受付時間が平日9時から17時までに変わります。\n対象・日付: 対象は契約者で、開始日は2026年7月1日です。\n確認事項: 手続きの締切日と利用可能時間を確認する必要があります。",
+            ], 200),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'auto_ai_summary' => true,
+            'is_active' => true,
+        ]);
+
+        $run = app(NewsCollectorService::class)->collectSource($source);
+        $item = CollectedItem::query()->where('title', '自動AI要約のお知らせ')->firstOrFail();
+
+        $this->assertSame('success', $run->status);
+        $this->assertStringContainsString('AI要約 1件', (string) $run->message);
+        $this->assertSame("概要: 利用者向けサービスの受付時間変更を知らせる記事です。\n主な内容: 受付時間が平日9時から17時までに変わります。\n対象・日付: 対象は契約者で、開始日は2026年7月1日です。\n確認事項: 手続きの締切日と利用可能時間を確認する必要があります。", $item->ai_summary);
+        $this->assertSame('gemma4:e2b', $item->ai_summary_model);
+        $this->assertNotNull($item->ai_summary_generated_at);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'http://ollama.test/api/generate'
+            && str_contains($request['prompt'], '平日9時から17時'));
+    }
+
+    public function test_collection_job_does_not_generate_ai_summary_when_disabled(): void
+    {
+        config([
+            'services.ollama.base_url' => 'http://ollama.test',
+            'services.ollama.model' => 'gemma4:e2b',
+        ]);
+        Http::fake([
+            'https://example.com/rss.xml' => Http::response(<<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>AI要約しないお知らせ</title>
+      <link>https://example.com/ai-disabled/1</link>
+      <pubDate>Mon, 01 Jun 2026 09:00:00 +0900</pubDate>
+      <description>2026年7月1日から利用者向けサービスの受付時間を変更します。対象者は契約者です。</description>
+    </item>
+  </channel>
+</rss>
+XML, 200, ['Content-Type' => 'application/rss+xml']),
+        ]);
+
+        $company = Company::create(['name' => 'Peer Co', 'is_active' => true]);
+        $source = WatchSource::create([
+            'company_id' => $company->id,
+            'source_name' => 'ニュース',
+            'source_url' => 'https://example.com/rss.xml',
+            'source_type' => 'rss',
+            'crawl_interval_minutes' => 60,
+            'auto_ai_summary' => false,
+            'is_active' => true,
+        ]);
+
+        app(NewsCollectorService::class)->collectSource($source);
+        $item = CollectedItem::query()->where('title', 'AI要約しないお知らせ')->firstOrFail();
+
+        $this->assertNull($item->ai_summary);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'http://ollama.test/api/generate');
     }
 
     public function test_calendar_schedule_runs_once_after_scheduled_time(): void

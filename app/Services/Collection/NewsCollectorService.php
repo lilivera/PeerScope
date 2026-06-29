@@ -6,6 +6,7 @@ use App\Models\CollectedItem;
 use App\Models\CollectionError;
 use App\Models\CollectionRun;
 use App\Models\WatchSource;
+use App\Services\Ai\OllamaSummaryService;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
@@ -28,6 +29,7 @@ class NewsCollectorService
         private readonly UrlNormalizer $urlNormalizer,
         private readonly ContentHashService $hashService,
         private readonly PdfAttachmentDownloader $pdfAttachmentDownloader,
+        private readonly OllamaSummaryService $ollamaSummaryService,
     ) {}
 
     public function collectDue(): ?CollectionRun
@@ -117,10 +119,11 @@ class NewsCollectorService
         $updated = 0;
         $errors = 0;
         $pdfSaved = 0;
+        $aiSummaryGenerated = 0;
         $sourceNumber = 0;
 
         if ($this->cancellationRequested($run)) {
-            return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+            return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved, $aiSummaryGenerated);
         }
 
         $this->updateRunProgress(
@@ -135,12 +138,12 @@ class NewsCollectorService
             $sourceNumber++;
 
             if ($this->cancellationRequested($run)) {
-                return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+                return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved, $aiSummaryGenerated);
             }
 
             try {
-                if (! $this->collectOne($source, $run, $sourceNumber, $sources->count(), $created, $updated, $errors, $pdfSaved)) {
-                    return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+                if (! $this->collectOne($source, $run, $sourceNumber, $sources->count(), $created, $updated, $errors, $pdfSaved, $aiSummaryGenerated)) {
+                    return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved, $aiSummaryGenerated);
                 }
             } catch (Throwable $exception) {
                 // 1つの収集先で失敗しても、ほかの収集先まで止めない。
@@ -165,7 +168,7 @@ class NewsCollectorService
         }
 
         if ($this->cancellationRequested($run)) {
-            return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved);
+            return $this->finishCancelledRun($run, $created, $updated, $errors, $pdfSaved, $aiSummaryGenerated);
         }
 
         $run->update([
@@ -174,7 +177,7 @@ class NewsCollectorService
             'created_count' => $created,
             'updated_count' => $updated,
             'error_count' => $errors,
-            'message' => sprintf('対象 %d件、新規 %d件、更新 %d件、PDF保存 %d件、エラー %d件', $sources->count(), $created, $updated, $pdfSaved, $errors),
+            'message' => sprintf('対象 %d件、新規 %d件、更新 %d件、PDF保存 %d件、AI要約 %d件、エラー %d件', $sources->count(), $created, $updated, $pdfSaved, $aiSummaryGenerated, $errors),
         ]);
 
         return $run->fresh(['errors', 'targetSources']);
@@ -249,6 +252,7 @@ class NewsCollectorService
         int &$updated,
         int &$errors,
         int &$pdfSaved,
+        int &$aiSummaryGenerated,
     ): bool {
         if ($this->cancellationRequested($run)) {
             return false;
@@ -257,6 +261,7 @@ class NewsCollectorService
         $result = $this->fetchAndParse($source);
         $itemTotal = count($result['items']);
         $sourcePdfSaved = 0;
+        $sourceAiSummaryGenerated = 0;
 
         if (! $this->updateRunProgress(
             $run,
@@ -289,6 +294,18 @@ class NewsCollectorService
                 $sourcePdfSaved++;
             }
 
+            if ($persisted['item']) {
+                $this->generateAiSummaryForCollectedItem(
+                    $source,
+                    $run,
+                    $persisted['item'],
+                    $state,
+                    $errors,
+                    $aiSummaryGenerated,
+                    $sourceAiSummaryGenerated,
+                );
+            }
+
             $processed = $index + 1;
 
             if ($this->shouldUpdateProgress($processed, $itemTotal)) {
@@ -297,7 +314,7 @@ class NewsCollectorService
                     $created,
                     $updated,
                     $errors,
-                    sprintf('[%d/%d] %s: %d/%d件処理中（PDF保存 %d件）', $sourceNumber, $sourceTotal, $source->source_name, $processed, $itemTotal, $sourcePdfSaved),
+                    sprintf('[%d/%d] %s: %d/%d件処理中（PDF保存 %d件、AI要約 %d件）', $sourceNumber, $sourceTotal, $source->source_name, $processed, $itemTotal, $sourcePdfSaved, $sourceAiSummaryGenerated),
                 )) {
                     return false;
                 }
@@ -315,12 +332,53 @@ class NewsCollectorService
             $created,
             $updated,
             $errors,
-            sprintf('[%d/%d] %s: 完了 %d件（PDF保存 %d件）', $sourceNumber, $sourceTotal, $source->source_name, $itemTotal, $sourcePdfSaved),
+            sprintf('[%d/%d] %s: 完了 %d件（PDF保存 %d件、AI要約 %d件）', $sourceNumber, $sourceTotal, $source->source_name, $itemTotal, $sourcePdfSaved, $sourceAiSummaryGenerated),
         )) {
             return false;
         }
 
         return true;
+    }
+
+    private function generateAiSummaryForCollectedItem(
+        WatchSource $source,
+        CollectionRun $run,
+        CollectedItem $item,
+        string $state,
+        int &$errors,
+        int &$aiSummaryGenerated,
+        int &$sourceAiSummaryGenerated,
+    ): void {
+        if (! $source->auto_ai_summary || ! in_array($state, ['created', 'updated'], true)) {
+            return;
+        }
+
+        try {
+            $summary = $this->ollamaSummaryService->generate($item->loadMissing('company'));
+
+            if ($summary === null) {
+                throw new \RuntimeException('AI要約に使える本文または要約がありません。');
+            }
+
+            $item->forceFill([
+                'ai_summary' => $summary,
+                'ai_summary_model' => $this->ollamaSummaryService->model(),
+                'ai_summary_generated_at' => now(),
+            ])->save();
+
+            $aiSummaryGenerated++;
+            $sourceAiSummaryGenerated++;
+        } catch (Throwable $exception) {
+            $errors++;
+
+            CollectionError::create([
+                'collection_run_id' => $run->id,
+                'watch_source_id' => $source->id,
+                'error_type' => 'AiSummaryGenerationFailed',
+                'error_message' => $item->title.': '.$exception->getMessage(),
+                'occurred_at' => now(),
+            ]);
+        }
     }
 
     /**
@@ -570,7 +628,7 @@ class NewsCollectorService
         return $run->refresh()->status === 'cancelled';
     }
 
-    private function finishCancelledRun(CollectionRun $run, int $created, int $updated, int $errors, int $pdfSaved): CollectionRun
+    private function finishCancelledRun(CollectionRun $run, int $created, int $updated, int $errors, int $pdfSaved, int $aiSummaryGenerated): CollectionRun
     {
         $this->touchCancelledRunSources($run);
 
@@ -580,7 +638,7 @@ class NewsCollectorService
             'created_count' => $created,
             'updated_count' => $updated,
             'error_count' => $errors,
-            'message' => sprintf('中断しました。新規 %d件、更新 %d件、PDF保存 %d件、エラー %d件', $created, $updated, $pdfSaved, $errors),
+            'message' => sprintf('中断しました。新規 %d件、更新 %d件、PDF保存 %d件、AI要約 %d件、エラー %d件', $created, $updated, $pdfSaved, $aiSummaryGenerated, $errors),
         ])->save();
 
         return $run->fresh(['errors', 'targetSources']);

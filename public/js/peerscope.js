@@ -112,6 +112,30 @@
         updateScheduleSettings();
     });
 
+    document.querySelectorAll('[data-ai-summary-form]').forEach((form) => {
+        form.addEventListener('submit', () => {
+            const button = form.querySelector('[data-ai-summary-button]');
+            const spinner = form.querySelector('[data-ai-summary-spinner]');
+            const icon = form.querySelector('[data-ai-summary-icon]');
+            const label = form.querySelector('[data-ai-summary-label]');
+            const status = document.querySelector('[data-ai-summary-status]');
+
+            if (button) {
+                button.disabled = true;
+                button.setAttribute('aria-busy', 'true');
+            }
+
+            spinner?.classList.remove('d-none');
+            icon?.classList.add('d-none');
+
+            if (label) {
+                label.textContent = 'AI要約を生成中...';
+            }
+
+            status?.classList.remove('d-none');
+        });
+    });
+
     const directoryPicker = document.getElementById('directoryPickerModal');
 
     if (directoryPicker) {

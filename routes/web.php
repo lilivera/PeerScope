@@ -27,6 +27,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/items/{item}', [CollectedItemController::class, 'show'])->name('items.show');
     Route::get('/items/{item}/pdf', [CollectedItemController::class, 'downloadPdf'])->name('items.pdf');
     Route::post('/items/{item}/read', [CollectedItemController::class, 'markRead'])->name('items.read');
+    Route::post('/items/{item}/ai-summary', [CollectedItemController::class, 'generateAiSummary'])->name('items.ai-summary');
 });
 
 // 収集設定やユーザー管理は管理者だけに絞る。

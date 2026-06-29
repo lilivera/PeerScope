@@ -19,6 +19,9 @@ class CollectedItem extends Model
         'published_at',
         'detected_at',
         'summary',
+        'ai_summary',
+        'ai_summary_model',
+        'ai_summary_generated_at',
         'body_text',
         'category',
         'pdf_storage_path',
@@ -33,6 +36,7 @@ class CollectedItem extends Model
         return [
             'published_at' => 'datetime',
             'detected_at' => 'datetime',
+            'ai_summary_generated_at' => 'datetime',
             'pdf_downloaded_at' => 'datetime',
         ];
     }
@@ -41,6 +45,16 @@ class CollectedItem extends Model
     {
         // 実ファイルの有無確認はコントローラ側で行い、ここでは保存情報の存在だけを見る。
         return filled($this->pdf_storage_path);
+    }
+
+    public function hasAiSummary(): bool
+    {
+        return filled($this->ai_summary);
+    }
+
+    public function displaySummary(): ?string
+    {
+        return $this->ai_summary ?: $this->summary;
     }
 
     public function company()
