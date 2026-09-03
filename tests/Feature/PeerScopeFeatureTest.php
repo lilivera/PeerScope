@@ -1345,7 +1345,10 @@ XML, 200, ['Content-Type' => 'application/rss+xml']),
     public function test_admin_can_cancel_running_collection_run(): void
     {
         $this->mock(CollectionProcessTerminator::class, function ($mock): void {
-            $mock->shouldReceive('terminate')->once()->andReturn(true);
+            $mock->shouldReceive('terminate')
+                ->once()
+                ->withArgs(fn (CollectionRun $run): bool => $run->fresh()->status === 'cancelled')
+                ->andReturn(true);
         });
 
         $admin = User::factory()->create(['role' => 'admin']);

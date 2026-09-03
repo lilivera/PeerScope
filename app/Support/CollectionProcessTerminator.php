@@ -8,6 +8,12 @@ class CollectionProcessTerminator
 {
     public function terminate(CollectionRun $run): bool
     {
+        // XAMPPのApache（mod_php）からPowerShellを実行するとApache子プロセスごと
+        // 終了することがあるため、WindowsのWebリクエストではDBフラグによる中断に任せる。
+        if (PHP_OS_FAMILY === 'Windows' && PHP_SAPI !== 'cli') {
+            return false;
+        }
+
         return PHP_OS_FAMILY === 'Windows'
             ? $this->terminateWindows($run)
             : $this->terminateUnix($run);

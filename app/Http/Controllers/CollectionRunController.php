@@ -90,17 +90,20 @@ class CollectionRunController extends Controller
                 ->with('status', 'この収集ログは既に終了しています。');
         }
 
-        $terminated = $terminator->terminate($collectionRun);
-
+        // 先に中断状態を保存し、OS側の停止処理が失敗しても実行中表示を残さない。
         $collectionRun->update([
             'finished_at' => now(),
             'status' => 'cancelled',
-            'message' => $terminated
-                ? '中断しました。実行中の収集プロセスを停止しました。'
-                : '中断要求を受け付けました。現在の処理単位が終わり次第停止します。',
+            'message' => '中断要求を受け付けました。現在の処理単位が終わり次第停止します。',
         ]);
 
         $this->touchTargetSources($collectionRun);
+
+        if ($terminator->terminate($collectionRun)) {
+            $collectionRun->update([
+                'message' => '中断しました。実行中の収集プロセスを停止しました。',
+            ]);
+        }
 
         return redirect()
             ->route('collection-runs.show', $collectionRun)
